@@ -1,0 +1,8 @@
+.env
+.secrets/
+temporal.db
+venv/
+venv39_old/
+__pycache__/
+media/
+db.sqlite3

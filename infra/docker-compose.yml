@@ -1,0 +1,19 @@
+services:
+  temporal-ui:
+    image: temporalio/ui:latest
+    network_mode: host
+    environment:
+      TEMPORAL_ADDRESS: 127.0.0.1:7233
+      TEMPORAL_UI_PORT: 8233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+      TEMPORAL_CSRF_COOKIE_INSECURE: "true"
+      TEMPORAL_AUTH_ENABLED: "true"
+      TEMPORAL_AUTH_TYPE: oidc
+      TEMPORAL_AUTH_REDIRECT_TO_PROVIDER: "true"
+      TEMPORAL_AUTH_PROVIDER_URL: http://localhost:8000/o
+      TEMPORAL_AUTH_ISSUER_URL: http://localhost:8000/o
+      TEMPORAL_AUTH_CLIENT_ID: ${TEMPORAL_UI_CLIENT_ID}
+      TEMPORAL_AUTH_CLIENT_SECRET: ${TEMPORAL_UI_CLIENT_SECRET}
+      TEMPORAL_AUTH_CALLBACK_URL: http://localhost:8233/auth/sso/callback
+      TEMPORAL_AUTH_SCOPES: openid,profile,email
+      TEMPORAL_AUTH_USE_ID_TOKEN_AS_BEARER: "true"

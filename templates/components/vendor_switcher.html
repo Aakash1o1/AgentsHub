@@ -1,0 +1,27 @@
+{% comment %}
+Vendor switcher — the single definition, rendered into the Unfold header.
+
+Injected via the `nav-global-side` block, which unfold/layouts/skeleton.html
+captures into a variable and unfold/helpers/userlinks.html renders. Because
+skeleton.html is the common ancestor of BOTH unfold layout trees (admin/base.html
+and unfold/layouts/base_simple.html), filling that block covers every page.
+
+Context comes from base.context_processors.admin_vendors, registered globally
+in settings, so this partial needs nothing from the view.
+{% endcomment %}
+
+{% if admin_vendors or user.is_superuser %}
+  <form method="post" action="{% url 'admin_set_vendor' %}" class="flex items-center gap-2">
+    {% csrf_token %}
+    <span class="text-font-subtle-light text-sm dark:text-font-subtle-dark">Vendor</span>
+    <select name="vendor_id" onchange="this.form.submit()"
+            class="bg-white border border-base-200 max-w-40 px-2 py-1 rounded text-font-default-light text-sm truncate dark:bg-base-900 dark:border-base-700 dark:text-font-default-dark">
+      {% if user.is_superuser %}
+        <option value="all" {% if not admin_active_vendor %}selected{% endif %}>All vendors</option>
+      {% endif %}
+      {% for v in admin_vendors %}
+        <option value="{{ v.id }}" {% if v == admin_active_vendor %}selected{% endif %}>{{ v.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+{% endif %}

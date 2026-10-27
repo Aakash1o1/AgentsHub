@@ -1,0 +1,612 @@
+{% extends "unfold/layouts/base.html" %}
+{% load static %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'scraper/doc_actions.css' %}">
+<link rel="stylesheet" href="{% static 'scraper/doc_list.css' %}">
+<style>
+  /* ---- theme tokens: light defaults, .dark overrides (matches Unfold) ---- */
+  .ragchat {
+    --rc-surface:#ffffff; --rc-surface-2:#f9fafb; --rc-border:#e5e7eb;
+    --rc-text:#374151; --rc-muted:#6b7280; --rc-heading:#111827;
+    --rc-primary:#7c3aed; --rc-primary-fg:#ffffff;
+    --rc-selected:#ede9fe; --rc-selected-fg:#5b21b6;
+    --rc-bubble-llm:#f3f4f6; --rc-bubble-user:#7c3aed;
+    --rc-scroll:color-mix(in oklab, var(--color-base-900) 40%, transparent);
+  }
+  .dark .ragchat {
+    --rc-surface:#1a1d29; --rc-surface-2:#141620; --rc-border:#2a2e3d;
+    --rc-text:#d1d5db; --rc-muted:#9ca3af; --rc-heading:#f3f4f6;
+    --rc-selected:rgba(124,58,237,.22); --rc-selected-fg:#ddd6fe;
+    --rc-bubble-llm:#242838; --rc-bubble-user:#7c3aed;
+    --rc-scroll:color-mix(in oklab, var(--color-base-400) 40%, transparent);
+  }
+
+  /* scrollbars styled like Unfold's SimpleBar: no track, no arrows, thin rounded thumb */
+  .ragchat ::-webkit-scrollbar { width:11px; height:11px; }
+  .ragchat ::-webkit-scrollbar-track { background:transparent; }
+  .ragchat ::-webkit-scrollbar-button { display:none; }
+  .ragchat ::-webkit-scrollbar-thumb { background:var(--rc-scroll); border:2px solid transparent;
+                                       background-clip:padding-box; border-radius:7px; }
+  @supports not selector(::-webkit-scrollbar) {
+    .ragchat * { scrollbar-width:thin; scrollbar-color:var(--rc-scroll) transparent; }
+  }
+
+  /* Make the whole page a flex chain down to .ragchat, so it fills exactly
+     the space below Unfold's header with no JS measuring and no gap. Each
+     link needs min-height:0, or flexbox refuses to shrink it below its
+     content's natural size and the chain breaks. */
+  #page { height:100vh; }
+  #main { min-height:0; }
+  #main > .px-4:not(:has(> #content)) { margin-bottom:0; }
+  #main > .px-4:has(> #content) { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+  #content { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+
+  /* full-bleed: cancel Unfold's px-4 pb-4 wrapper padding */
+  .ragchat { display:flex; flex-direction:column; overflow:hidden;
+             flex:1 1 auto; height:auto; min-height:480px;
+             margin:0 -16px; color:var(--rc-text); }
+
+  /* top bar */
+  .rc-topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
+               padding:12px 16px; border-bottom:1px solid var(--rc-border); }
+  .rc-topbar h2 { font-size:18px; font-weight:700; color:var(--rc-heading); margin:0; }
+  .rc-topright { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .rc-user { color:var(--rc-muted); font-size:13px; }
+  .rc-user b { color:var(--rc-heading); }
+
+  /* form controls */
+  .ragchat input[type=text], .ragchat input[type=url], .ragchat textarea {
+    background:var(--rc-surface); border:1px solid var(--rc-border); color:var(--rc-text);
+    border-radius:8px; padding:7px 10px; font-size:13px; outline:none; }
+  .ragchat input:focus, .ragchat textarea:focus { border-color:var(--rc-primary); }
+  .rc-btn { background:var(--rc-surface); border:1px solid var(--rc-border); color:var(--rc-text);
+            border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; }
+  .rc-btn:hover { border-color:var(--rc-primary); color:var(--rc-heading); }
+  .rc-btn-primary { background:var(--rc-primary); border-color:var(--rc-primary); color:var(--rc-primary-fg); }
+  .rc-btn-primary:hover { color:var(--rc-primary-fg); opacity:.9; }
+  .rc-link { color:var(--rc-primary); text-decoration:none; font-size:13px; }
+
+  /* two-pane body — no gap, panes touch */
+  .rc-body { display:flex; flex:1; min-height:0; }
+  .rc-card { display:flex; flex-direction:column; min-height:0; }
+
+  /* left: chat list — divider only, no card background */
+  .rc-list { width:300px; flex-shrink:0; border-right:1px solid var(--rc-border); }
+  .rc-card-head { padding:14px 16px; border-bottom:1px solid var(--rc-border);
+                  font-weight:600; color:var(--rc-heading); font-size:14px; }
+  .rc-newchat { padding:12px 16px; border-bottom:1px solid var(--rc-border); }
+  .rc-newchat .rc-btn { width:100%; }
+  .rc-chats { flex:1; overflow-y:auto; padding:8px; }
+  .rc-chatitem { display:flex; align-items:center; padding-right:6px; border-radius:8px; color:var(--rc-text);
+                 font-size:14px; margin-bottom:2px; }
+  .rc-chatitem:hover { background:var(--rc-surface-2); }
+  .rc-chatitem.active { background:var(--rc-selected); color:var(--rc-selected-fg); font-weight:600; }
+  .rc-chat-link { flex:1; min-width:0; display:flex; align-items:baseline; gap:10px; padding:10px 6px 10px 12px;
+                  color:inherit; text-decoration:none; }
+  .rc-chat-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rc-chat-time { flex-shrink:0; font-size:11px; color:var(--rc-muted); font-variant-numeric:tabular-nums; }
+  .rc-empty { color:var(--rc-muted); font-size:13px; padding:12px; font-style:italic; }
+
+  /* right: conversation */
+  .rc-convo { flex:1; }
+  .rc-convo-head { display:flex; justify-content:space-between; align-items:center; gap:8px;
+                   padding:12px 16px; border-bottom:1px solid var(--rc-border); }
+  .rc-convo-head .rc-title { font-weight:600; color:var(--rc-heading); font-size:15px; }
+  .rc-convo-actions { display:flex; gap:8px; align-items:center; }
+  .rc-messages { flex:1; overflow-y:auto; padding:18px 16px; display:flex; flex-direction:column; gap:12px; }
+  .rc-msg { max-width:75%; padding:10px 14px; border-radius:14px; font-size:14px; line-height:1.5; white-space:pre-wrap; }
+  .rc-msg.user { align-self:flex-end; background:var(--rc-bubble-user); color:#fff; border-bottom-right-radius:4px; }
+  .rc-msg.llm  { align-self:flex-start; background:var(--rc-bubble-llm); color:var(--rc-text); border-bottom-left-radius:4px; }
+  .rc-agent { display:block; font-size:11px; font-weight:600; opacity:.7; margin-bottom:5px;
+              padding:1px 8px; border-radius:10px; background:rgba(0,0,0,.08); align-self:flex-start; }
+  .rc-md { white-space:normal; }
+  .rc-md > :first-child { margin-top:0; }
+  .rc-md > :last-child { margin-bottom:0; }
+  .rc-md p, .rc-md ul, .rc-md ol, .rc-md pre, .rc-md blockquote, .rc-md table { margin:0 0 8px; }
+  .rc-md h1, .rc-md h2, .rc-md h3, .rc-md h4 { font-weight:700; color:var(--rc-heading); line-height:1.3; margin:12px 0 6px; }
+  .rc-md h1 { font-size:18px; }
+  .rc-md h2 { font-size:16px; }
+  .rc-md h3, .rc-md h4 { font-size:14px; }
+  .rc-md ul { list-style:disc; padding-left:20px; }
+  .rc-md ol { list-style:decimal; padding-left:20px; }
+  .rc-md li { margin:2px 0; }
+  .rc-md strong { font-weight:700; color:var(--rc-heading); }
+  .rc-md em { font-style:italic; }
+  .rc-md a { color:var(--rc-primary); text-decoration:underline; }
+  .rc-md code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px;
+                padding:1px 5px; border-radius:4px; background:rgba(0,0,0,.08); }
+  .dark .rc-md code { background:rgba(255,255,255,.08); }
+  .rc-md pre { padding:10px 12px; border-radius:8px; background:var(--rc-surface-2);
+               border:1px solid var(--rc-border); overflow-x:auto; }
+  .rc-md pre code { padding:0; background:none; }
+  .rc-md blockquote { padding-left:10px; border-left:3px solid var(--rc-border); color:var(--rc-muted); }
+  .rc-md table { display:block; overflow-x:auto; border-collapse:collapse; font-size:13px; }
+  .rc-md th, .rc-md td { border:1px solid var(--rc-border); padding:4px 8px; text-align:left; }
+  .rc-md th { background:var(--rc-surface-2); font-weight:600; }
+  .rc-md hr { border:0; border-top:1px solid var(--rc-border); margin:10px 0; }
+  .rc-chart { width:min(560px, 60vw); margin-top:10px; padding:14px 16px 12px; white-space:normal;
+              background:#fff; border:1px solid #e5e7eb; border-radius:10px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .rc-chart-title { font-size:13px; font-weight:600; color:#0b0b0b; margin-bottom:10px; }
+  .rc-chart-plot { position:relative; height:260px; }
+  .rc-notice { align-self:center; max-width:80%; text-align:center; font-size:12px; font-style:italic; opacity:.7; padding:4px 10px; border:1px dashed var(--rc-border); border-radius:10px; }
+  .rc-typing { display:flex; gap:4px; align-items:center; padding:14px; }
+  .rc-typing span { width:7px; height:7px; border-radius:50%; background:var(--rc-muted);
+                    animation:rc-blink 1.2s infinite; }
+  .rc-typing span:nth-child(2) { animation-delay:.2s; }
+  .rc-typing span:nth-child(3) { animation-delay:.4s; }
+  @keyframes rc-blink { 0%, 80%, 100% { opacity:.25; } 40% { opacity:1; } }
+  .rc-composer { display:flex; gap:8px; padding:12px 16px 8px; border-top:1px solid var(--rc-border); }
+  .rc-composer input { flex:1; }
+  .rc-file { display:flex; align-items:center; gap:6px; width:fit-content; max-width:100%; padding:6px 10px 6px 8px;
+             border:1px solid var(--rc-border); border-radius:8px; background:var(--rc-surface);
+             font-size:12px; line-height:1.2; white-space:nowrap; }
+  .rc-file .material-symbols-outlined { font-size:18px; color:var(--rc-primary); }
+  .rc-file-name { font-weight:600; color:var(--rc-heading); overflow:hidden; text-overflow:ellipsis; }
+  .rc-file-meta { color:var(--rc-muted); }
+  .rc-attached { padding:12px 16px 0; border-top:1px solid var(--rc-border); }
+  .rc-attached:not([hidden]) ~ .rc-composer { border-top:0; }
+  .rc-file-remove { display:inline-flex; align-items:center; margin-left:2px; padding:0; border:0; background:transparent;
+                    color:var(--rc-muted); cursor:pointer; }
+  .rc-file-remove:hover { color:var(--rc-heading); }
+  .rc-file-remove .material-symbols-outlined { font-size:16px; color:inherit; }
+  .rc-msg.user .rc-file { margin-bottom:8px; background:rgba(255,255,255,.16); border-color:rgba(255,255,255,.3); }
+  .rc-msg.user .rc-file .material-symbols-outlined, .rc-msg.user .rc-file-name { color:#fff; }
+  .rc-msg.user .rc-file-meta { color:rgba(255,255,255,.75); }
+  .rc-flash { padding:12px 16px 0; }
+  .rc-placeholder { flex:1; display:flex; align-items:center; justify-content:center; color:var(--rc-muted); font-size:14px; }
+</style>
+
+<div class="ragchat">
+
+  <!-- ===== top bar: title (left), vendor + user (right) ===== -->
+  <div class="rc-topbar">
+    <h2>Chat</h2>
+    <div class="rc-topright">
+      <span class="rc-user">👤 <b>{{ user.username }}</b></span>
+      <a href="/admin/logout/" class="rc-link">Log out</a>
+    </div>
+  </div>
+
+  {% if messages %}<div class="rc-flash">{% include "unfold/helpers/messages.html" %}</div>{% endif %}
+
+  <!-- ===== two panes ===== -->
+  <div class="rc-body">
+
+    <!-- left: chat list -->
+    <div class="rc-card rc-list">
+      <form method="post" action="{% url 'create_chat' %}" class="rc-newchat">
+        {% csrf_token %}
+        <button type="submit" class="rc-btn-primary rc-btn">New chat</button>
+      </form>
+      <div class="rc-chats">
+        {% for c in chats %}
+          <div class="rc-chatitem {% if open_chat and c.id == open_chat.id %}active{% endif %}" data-chat-id="{{ c.id }}">
+            <a href="?chat={{ c.id }}" class="rc-chat-link">
+              <span class="rc-chat-title">{{ c.title }}</span>
+              <time class="rc-chat-time" datetime="{{ c.last_message_at|date:'c' }}">{{ c.last_message_at|date:"j M" }}</time>
+            </a>
+          </div>
+        {% empty %}
+          <div class="rc-empty">No chats yet</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- right: conversation -->
+    <div class="rc-card rc-convo">
+      {% if open_chat %}
+        <div class="rc-convo-head">
+          <span class="rc-title">{{ open_chat.title }}</span>
+        </div>
+
+        <div class="rc-messages" data-chat-id="{{ open_chat.id }}">
+          {% for m in chat_messages %}
+            <div class="rc-msg {% if m.role == 'user' %}user{% else %}llm{% endif %}">{% if m.attachment %}<span class="rc-file"><span class="material-symbols-outlined">description</span><span class="rc-file-name">{{ m.file_label }}</span></span>{% endif %}{% if m.role != 'user' and m.agent %}<span class="rc-agent">🤖 {{ m.agent.label }}</span>{% endif %}{% if m.role == 'user' %}{{ m.message }}{% else %}<div class="rc-md" data-md>{{ m.message }}</div>{% endif %}{% if m.artifact %}{{ m.artifact|json_script }}{% endif %}</div>
+          {% empty %}
+            <div class="rc-empty">No messages yet — ask something below.</div>
+          {% endfor %}
+        </div>
+
+        <!-- ask a question -->
+        <input type="file" accept=".csv,text/csv" hidden data-csv-input>
+        <div class="rc-attached" hidden></div>
+        <form method="post" action="{% url 'send_message' %}" class="rc-composer" data-upload-url="{% url 'upload_dataset' %}"{% if open_chat.is_answering %} data-answering{% endif %}>
+          {% csrf_token %}
+          <input type="hidden" name="chat_id" value="{{ open_chat.id }}">
+          <input type="hidden" name="file" value="">
+          <input type="text" name="question" placeholder="Ask something…" autofocus autocomplete="off">
+          <button type="submit" class="rc-btn-primary rc-btn">Send</button>
+        </form>
+
+        <!-- add context: CSV for this chat, documents for the vendor -->
+        <div class="rc-tools rc-adddoc" data-add-url="{% url 'add_document' %}" data-chat-id="{{ open_chat.id }}">
+          <div class="rc-tools-row">
+            <button type="button" class="rc-tool" title="Attach a CSV to your next question" data-attach><span class="material-symbols-outlined">attach_file</span>Upload CSV</button>
+            <details class="rc-adddoc-menu">
+              <summary class="rc-tool" title="Add a document to the knowledge base"><span class="material-symbols-outlined">note_add</span>Add context document<span class="material-symbols-outlined rc-tool-caret">expand_less</span></summary>
+              <div class="rc-adddoc-options">
+                {% for value, label in document_types %}
+                  <button type="button" data-source-type="{{ value }}">{{ label }}</button>
+                {% endfor %}
+              </div>
+            </details>
+            <div class="rc-adddoc-result" hidden></div>
+          </div>
+          <form class="rc-adddoc-form" hidden>
+            <span class="rc-adddoc-type" data-type-label></span>
+            <input type="url" name="url" placeholder="Paste a link, https://…" required autocomplete="off">
+            <button type="submit" class="rc-btn rc-btn-primary">Add and process</button>
+            <button type="button" class="rc-adddoc-close" aria-label="Close" data-close><span class="material-symbols-outlined">close</span></button>
+          </form>
+        </div>
+      {% else %}
+        <div class="rc-placeholder">Select a chat on the left, or create a new one.</div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="{% static 'scraper/doc_actions.js' %}"></script>
+<script src="{% static 'scraper/doc_list.js' %}"></script>
+<script>
+  function showChatTime(el) {
+    const when = new Date(el.getAttribute("datetime"));
+    if (isNaN(when)) return;
+    const ago = function (count, unit) { return count + " " + unit + (count === 1 ? "" : "s") + " ago"; };
+    const minutes = Math.floor((Date.now() - when) / 60000);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    let text;
+    if (minutes < 1) {
+      text = "Just now";
+    } else if (minutes < 60) {
+      text = minutes + " min ago";
+    } else if (hours < 24) {
+      text = ago(hours, "hour");
+    } else if (days === 1) {
+      text = "Yesterday";
+    } else if (days < 7) {
+      text = ago(days, "day");
+    } else if (days < 30) {
+      text = ago(Math.floor(days / 7), "week");
+    } else if (days < 365) {
+      text = ago(Math.floor(days / 30), "month");
+    } else {
+      text = ago(Math.floor(days / 365), "year");
+    }
+    el.textContent = text;
+    el.title = when.toLocaleString([], {dateStyle: "full", timeStyle: "short"});
+  }
+
+  function refreshChatTimes() {
+    document.querySelectorAll(".rc-chat-time").forEach(showChatTime);
+  }
+
+  refreshChatTimes();
+  setInterval(refreshChatTimes, 60000);
+
+  function applyChatTitle(chatId, title) {
+    document.querySelectorAll(`.rc-chatitem[data-chat-id="${chatId}"] .rc-chat-title`).forEach(function (el) {
+      el.textContent = title;
+    });
+    const box = document.querySelector(".rc-messages");
+    const head = document.querySelector(".rc-convo-head .rc-title");
+    if (box && head && box.dataset.chatId === String(chatId)) head.textContent = title;
+  }
+
+  (function () {
+    const box = document.querySelector(".rc-messages");
+    const form = document.querySelector(".rc-composer");
+    if (!box || !form) return;
+
+    const chatId = box.dataset.chatId;
+    const input = form.querySelector("[name=question]");
+    const sendButton = form.querySelector("[type=submit]");
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${scheme}://${location.host}/ws/chat/${chatId}/`);
+    let pending = null;
+
+    const CHART_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+    const CHART_INK = "#52514e";
+    const CHART_GRID = "#ececea";
+    Chart.defaults.font.family = "Inter, system-ui, sans-serif";
+    Chart.defaults.font.size = 12;
+
+    function foldSlices(labels, values) {
+      if (labels.length <= CHART_COLORS.length) return {labels: labels, values: values};
+      const keep = CHART_COLORS.length - 1;
+      const rest = values.slice(keep).reduce(function (sum, v) { return sum + (v || 0); }, 0);
+      return {labels: labels.slice(0, keep).concat("Other"), values: values.slice(0, keep).concat(rest)};
+    }
+
+    function chartDataset(chart, values) {
+      if (chart.type === "pie") {
+        return {data: values, backgroundColor: CHART_COLORS, borderColor: "#fff", borderWidth: 2, hoverOffset: 4};
+      }
+      if (chart.type === "line") {
+        return {label: chart.label, data: values, borderColor: CHART_COLORS[0], backgroundColor: CHART_COLORS[0],
+                borderWidth: 2, cubicInterpolationMode: "monotone", pointRadius: 4, pointHoverRadius: 6,
+                pointBorderColor: "#fff", pointBorderWidth: 2};
+      }
+      return {label: chart.label, data: values, backgroundColor: CHART_COLORS[0],
+              borderRadius: 4, borderSkipped: "start", maxBarThickness: 40};
+    }
+
+    function chartScales(chart) {
+      if (chart.type === "pie") return {};
+      return {
+        x: {grid: {display: false}, border: {color: CHART_GRID}, ticks: {color: CHART_INK}},
+        y: {beginAtZero: true, grid: {color: CHART_GRID}, border: {display: false}, ticks: {color: CHART_INK, maxTicksLimit: 6}},
+      };
+    }
+
+    function drawChart(bubble, chart) {
+      const wrap = document.createElement("div");
+      wrap.className = "rc-chart";
+      const title = document.createElement("div");
+      title.className = "rc-chart-title";
+      title.textContent = chart.title;
+      const plot = document.createElement("div");
+      plot.className = "rc-chart-plot";
+      const canvas = document.createElement("canvas");
+      plot.appendChild(canvas);
+      wrap.append(title, plot);
+      bubble.appendChild(wrap);
+      const data = chart.type === "pie" ? foldSlices(chart.labels, chart.values) : {labels: chart.labels, values: chart.values};
+      new Chart(canvas, {
+        type: chart.type,
+        data: {labels: data.labels, datasets: [chartDataset(chart, data.values)]},
+        options: {
+          maintainAspectRatio: false,
+          scales: chartScales(chart),
+          plugins: {
+            legend: {
+              display: chart.type === "pie",
+              position: "right",
+              align: "center",
+              labels: {color: CHART_INK, usePointStyle: true, pointStyle: "circle", boxWidth: 8, boxHeight: 8, padding: 12},
+            },
+            tooltip: {backgroundColor: "#0b0b0b", padding: 10, cornerRadius: 6, displayColors: chart.type === "pie"},
+          },
+        },
+      });
+    }
+
+    const ARTIFACT_RENDERERS = {chart: drawChart, document_runs: RunsCard.draw};
+
+    function drawArtifact(bubble, artifact) {
+      const draw = ARTIFACT_RENDERERS[artifact.kind];
+      if (draw) draw(bubble, artifact);
+    }
+
+    DOMPurify.addHook("afterSanitizeAttributes", function (node) {
+      if (node.tagName === "A") {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+    });
+
+    function renderMarkdown(text) {
+      const body = document.createElement("div");
+      body.className = "rc-md";
+      body.innerHTML = DOMPurify.sanitize(marked.parse(text, {gfm: true, breaks: true}));
+      return body;
+    }
+
+    box.querySelectorAll("[data-md]").forEach(function (raw) {
+      raw.replaceWith(renderMarkdown(raw.textContent));
+    });
+
+    box.querySelectorAll(".rc-msg script[type='application/json']").forEach(function (data) {
+      drawArtifact(data.parentElement, JSON.parse(data.textContent));
+    });
+
+    function scrollToBottom() {
+      box.scrollTop = box.scrollHeight;
+    }
+    scrollToBottom();
+    requestAnimationFrame(scrollToBottom);
+    window.addEventListener("load", scrollToBottom);
+
+    function fileChip(attachment) {
+      const chip = document.createElement("span");
+      chip.className = "rc-file";
+      const icon = document.createElement("span");
+      icon.className = "material-symbols-outlined";
+      icon.textContent = "description";
+      const name = document.createElement("span");
+      name.className = "rc-file-name";
+      name.textContent = attachment.name;
+      chip.append(icon, name);
+      return chip;
+    }
+
+    const fileInput = document.querySelector("[data-csv-input]");
+    const attached = document.querySelector(".rc-attached");
+    const fileField = form.querySelector("[name=file]");
+    const csrf = form.querySelector("[name=csrfmiddlewaretoken]").value;
+    let uploadRun = 0;
+    let uploading = false;
+
+    function clearAttachment() {
+      uploadRun += 1;
+      uploading = false;
+      fileField.value = "";
+      attached.replaceChildren();
+      attached.hidden = true;
+    }
+
+    function showAttachment(name, note) {
+      const chip = fileChip({name: name});
+      if (note) {
+        const meta = document.createElement("span");
+        meta.className = "rc-file-meta";
+        meta.textContent = note;
+        chip.appendChild(meta);
+      }
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "rc-file-remove";
+      remove.setAttribute("aria-label", "Remove file");
+      remove.innerHTML = '<span class="material-symbols-outlined">close</span>';
+      remove.addEventListener("click", clearAttachment);
+      chip.appendChild(remove);
+      attached.replaceChildren(chip);
+      attached.hidden = false;
+    }
+
+    async function uploadFile(file) {
+      clearAttachment();
+      const run = uploadRun;
+      uploading = true;
+      showAttachment(file.name, "Uploading…");
+      const body = new FormData();
+      body.append("csrfmiddlewaretoken", csrf);
+      body.append("chat_id", chatId);
+      body.append("file", file);
+      try {
+        const response = await fetch(form.dataset.uploadUrl, {method: "POST", body: body});
+        const data = await response.json().catch(function () { return {}; });
+        if (run !== uploadRun) return;
+        if (!response.ok || !data.token) throw new Error(data.error || "Upload failed.");
+        uploading = false;
+        fileField.value = data.token;
+        showAttachment(data.name, "");
+      } catch (error) {
+        if (run !== uploadRun) return;
+        clearAttachment();
+        addBubble("assistant", "⚠ " + error.message, "");
+      }
+    }
+
+    document.querySelector("[data-attach]").addEventListener("click", function () { fileInput.click(); });
+    fileInput.addEventListener("change", function () {
+      const file = fileInput.files[0];
+      fileInput.value = "";
+      if (file) uploadFile(file);
+    });
+
+    function addBubble(role, text, agent, artifact, attachment) {
+      const empty = box.querySelector(".rc-empty");
+      if (empty) empty.remove();
+      const div = document.createElement("div");
+      div.className = "rc-msg " + (role === "user" ? "user" : "llm");
+      if (attachment) div.appendChild(fileChip(attachment));
+      if (agent) {
+        const tag = document.createElement("span");
+        tag.className = "rc-agent";
+        tag.textContent = "🤖 " + agent;
+        div.appendChild(tag);
+      }
+      div.appendChild(role === "user" ? document.createTextNode(text) : renderMarkdown(text));
+      box.insertBefore(div, pending);
+      if (artifact) drawArtifact(div, artifact);
+      box.scrollTop = box.scrollHeight;
+      return div;
+    }
+
+    function showTyping() {
+      if (pending) return;
+      const empty = box.querySelector(".rc-empty");
+      if (empty) empty.remove();
+      const div = document.createElement("div");
+      div.className = "rc-msg llm rc-typing";
+      div.setAttribute("aria-label", "Thinking");
+      div.innerHTML = "<span></span><span></span><span></span>";
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+      pending = div;
+    }
+
+    function addNotice(text) {
+      const empty = box.querySelector(".rc-empty");
+      if (empty) empty.remove();
+      const div = document.createElement("div");
+      div.className = "rc-notice";
+      div.appendChild(document.createTextNode(text));
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function clearPending() {
+      if (pending) pending.remove();
+      pending = null;
+    }
+
+    function setBusy(busy) {
+      input.disabled = busy;
+      sendButton.disabled = busy;
+      document.querySelector(".rc-tools").classList.toggle("rc-tools-busy", busy);
+      if (!busy) input.focus();
+    }
+
+    function bumpActiveChat() {
+      const item = document.querySelector(".rc-chatitem.active");
+      if (!item) return;
+      const time = item.querySelector(".rc-chat-time");
+      time.setAttribute("datetime", new Date().toISOString());
+      showChatTime(time);
+      item.parentElement.prepend(item);
+    }
+
+    socket.onmessage = function (event) {
+      const data = JSON.parse(event.data);
+      if (data.event === "message") {
+        if (data.message.role === "assistant") {
+          clearPending();
+          setBusy(false);
+        }
+        addBubble(data.message.role, data.message.message, data.message.agent, data.message.artifact, data.message.attachment);
+        bumpActiveChat();
+      } else if (data.event === "thinking") {
+        showTyping();
+        setBusy(true);
+      } else if (data.event === "error") {
+        clearPending();
+        setBusy(false);
+        addBubble("assistant", "⚠ " + data.detail, "");
+      } else if (data.event === "busy") {
+        addNotice("⏳ " + data.detail);
+      } else if (data.event === "notice") {
+        addNotice("📄 " + data.detail);
+      } else if (data.event === "renamed") {
+        applyChatTitle(data.chat_id, data.title);
+      }
+    };
+
+    socket.onclose = function () {
+      clearPending();
+      setBusy(false);
+      addBubble("assistant", "⚠ Connection lost — reload the page.", "");
+    };
+
+    form.addEventListener("submit", function (event) {
+      if (uploading || input.disabled) {
+        event.preventDefault();
+        return;
+      }
+      if (socket.readyState !== WebSocket.OPEN) return;
+      event.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+      socket.send(JSON.stringify({question: question, file: fileField.value}));
+      clearAttachment();
+      showTyping();
+      input.value = "";
+      setBusy(true);
+    });
+
+    if (form.hasAttribute("data-answering")) {
+      showTyping();
+      setBusy(true);
+    }
+  })();
+
+
+</script>
+{% endblock %}

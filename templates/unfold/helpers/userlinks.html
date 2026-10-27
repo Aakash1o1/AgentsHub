@@ -1,0 +1,37 @@
+{% load i18n static unfold %}
+
+{% comment %}
+OVERRIDE of unfold/helpers/userlinks.html (django-unfold 0.89.0).
+
+WHY A FORK RATHER THAN A BLOCK:
+unfold/helpers/header.html includes this file on every page of BOTH unfold
+layout trees (admin/base.html and unfold/layouts/base_simple.html), so it is
+the only single point that reaches everything.
+
+The obvious alternative -- the `nav-global-side` block captured in
+unfold/layouts/skeleton.html -- does not work here:
+  1. unfold's own admin/change_list.html already fills `nav-global-side` with
+     the object-tools "Add" button, and as the leaf template it wins. Filling
+     it from a base template is ignored on changelists; winning would delete
+     the Add button.
+  2. admin/index.html and admin/app_index.html extend admin/base.html directly,
+     bypassing admin/base_site.html, so a block defined there never reaches them.
+
+ON UPGRADING django-unfold: re-diff this against the packaged
+unfold/helpers/userlinks.html. Everything below except the single
+vendor_switcher include is a verbatim copy.
+{% endcomment %}
+
+<div class="flex flex-row gap-4 items-center ml-auto">
+    {% include "components/vendor_switcher.html" %}
+
+    {% if environment %}
+        {% include "unfold/helpers/label.html" with text=environment.0 type=environment.1 %}
+    {% endif %}
+
+    {% action_list %}
+
+    {% if nav_global_side %}
+        {{ nav_global_side }}
+    {% endif %}
+</div>
