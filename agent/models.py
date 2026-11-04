@@ -20,6 +20,8 @@ class Agent(BaseModel):
 
     graph_json = models.JSONField(default=dict, blank=True)
 
+    sub_agents = models.ManyToManyField("self", symmetrical=False, related_name="parent_agents", blank=True)
+
     class Meta:
         constraints = [
             models.UniqueConstraint(

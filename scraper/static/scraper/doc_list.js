@@ -265,26 +265,27 @@
     class AddDocumentForm {
         constructor(root) {
             this.root = root;
-            this.menu = root.querySelector(".rc-adddoc-menu");
+            this.toggle = root.querySelector("[data-link-toggle]");
+            this.pop = root.querySelector(".rc-linkpop");
             this.form = root.querySelector(".rc-adddoc-form");
             this.input = this.form.querySelector("[name=url]");
-            this.typeLabel = this.form.querySelector("[data-type-label]");
             this.submit = this.form.querySelector("[type=submit]");
             this.result = root.querySelector(".rc-adddoc-result");
-            this.sourceType = "";
             this.bind();
         }
 
         bind() {
             const self = this;
-            this.menu.querySelectorAll("[data-source-type]").forEach(function (option) {
-                option.addEventListener("click", function () {
-                    self.choose(option.dataset.sourceType, option.textContent);
-                });
+            this.toggle.addEventListener("click", function () {
+                if (self.pop.hidden) {
+                    self.open();
+                } else {
+                    self.close();
+                }
             });
             document.addEventListener("click", function (event) {
-                if (!self.menu.contains(event.target)) {
-                    self.menu.open = false;
+                if (!self.pop.hidden && !self.pop.contains(event.target) && !self.toggle.contains(event.target)) {
+                    self.close();
                 }
             });
             this.form.querySelector("[data-close]").addEventListener("click", this.close.bind(this));
@@ -299,18 +300,18 @@
             });
         }
 
-        choose(sourceType, label) {
-            this.sourceType = sourceType;
-            this.typeLabel.textContent = label;
-            this.menu.open = false;
+        open() {
             this.result.hidden = true;
-            this.form.hidden = false;
+            this.pop.hidden = false;
+            this.toggle.classList.add("rc-on");
             this.input.focus();
         }
 
         close() {
-            this.form.hidden = true;
+            this.pop.hidden = true;
+            this.toggle.classList.remove("rc-on");
             this.input.value = "";
+            this.result.hidden = true;
         }
 
         show(level, text) {
@@ -326,14 +327,12 @@
             try {
                 const reply = await Html.post(this.root.dataset.addUrl, {
                     url: this.input.value,
-                    source_type: this.sourceType,
                     chat_id: this.root.dataset.chatId,
                 });
                 if (reply.ok) {
-                    this.result.hidden = true;
                     this.close();
                 } else {
-                    this.show(reply.data.level || "error", reply.data.message || "Could not add the document (" + reply.status + ").");
+                    this.show(reply.data.level || "error", reply.data.message || "Could not add the link (" + reply.status + ").");
                 }
             } catch (error) {
                 this.show("error", error.message);

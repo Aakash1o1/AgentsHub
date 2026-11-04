@@ -1,4 +1,5 @@
 import re
+from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 from temporalio.exceptions import WorkflowAlreadyStartedError
@@ -7,7 +8,9 @@ from scraper.services.client import OllamaClient
 from scraper.models import Chunk, Document
 from scraper.services.progress import DocumentProgress
 from scraper.temporal_workflow.temporal import DocumentWorkflows
+from chat.models import Message
 from chat.services.chat import ChatService
+from chat.services.files import ChatFileService
 from analysis.services.datasets import DatasetService
 from ddgs import DDGS
 from langchain_core.tools import tool
@@ -66,7 +69,7 @@ def summarize_chat(config: RunnableConfig) -> str:
 class DatasetTools:
     # Graph Types
     CHART_TYPES = ("bar", "line", "pie")
-    NO_DATASET = ("No CSV has been uploaded in this chat yet. "
+    NO_DATASET = ("No CSV or Excel file has been uploaded in this chat yet. "
                   "Ask the user to upload one with the clip button next to the message box.")
 
 
@@ -102,7 +105,7 @@ class DatasetTools:
 
     @tool
     def list_datasets(config: RunnableConfig) -> str:
-        """List every CSV table uploaded in this chat with its column names. Call this first for any question about data, then pick the table that fits the question, or JOIN tables when the question needs more than one."""
+        """List every CSV or Excel table uploaded in this chat with its column names. Call this first for any question about data, then pick the table that fits the question, or JOIN tables when the question needs more than one."""
         files = DatasetTools.chat_files(config)
         if not files:
             return DatasetTools.NO_DATASET
@@ -134,7 +137,7 @@ class DatasetTools:
 
     @tool
     def query_dataset(sql: str, config: RunnableConfig) -> str:
-        """Run one DuckDB SQL SELECT query over this chat's CSV tables (you can JOIN them) and return the result rows. Use this for every number you report, and to check a column's real values with SELECT DISTINCT ... LIMIT 10 before filtering on them."""
+        """Run one DuckDB SQL SELECT query over this chat's CSV and Excel tables (you can JOIN them) and return the result rows. Use this for every number you report, and to check a column's real values with SELECT DISTINCT ... LIMIT 10 before filtering on them."""
         files = DatasetTools.chat_files(config)
         if not files:
             return DatasetTools.NO_DATASET
@@ -172,6 +175,27 @@ class DatasetTools:
             "values": values,
         }
         return "The chart is shown to the user. It contains:\n" + DatasetTools.format_result(result), chart
+
+    @tool(response_format="content_and_artifact")
+    def make_chart_from_values(title: str, chart_type: str, value_label: str, labels: list[str], values: list[float]) -> tuple[str, dict]:
+        """Draw a chart from numbers you found in text, such as a PDF, text file or link read with read_chat_file, or document search results. labels[i] is the name of the bar, point or slice and values[i] its number; both lists must have the same length. value_label says what the numbers are, e.g. "Sales (USD)". chart_type is bar, line or pie. Use it ONLY when the text states the numbers. Never estimate, count or invent values. If the text has no numbers to chart, do not call this; tell the user no chart can be made. For CSV or Excel tables use make_chart instead."""
+        if chart_type not in DatasetTools.CHART_TYPES:
+            return f"Error: chart_type must be one of {', '.join(DatasetTools.CHART_TYPES)}.", None
+        if not labels or len(labels) != len(values):
+            return f"Error: labels and values must be non-empty lists of the same length (got {len(labels)} and {len(values)}).", None
+        if len(labels) > DatasetService.MAX_ROWS:
+            return f"Error: at most {DatasetService.MAX_ROWS} points can be charted.", None
+        chart = {
+            "kind": "chart",
+            "type": chart_type,
+            "title": title,
+            "label": value_label,
+            "labels": [str(label) for label in labels],
+            "values": values,
+        }
+        points = "\n".join(f"{label} | {value}" for label, value in zip(labels, values))
+        return ("The chart is shown to the user. It contains these values; tell the user they were taken from the text "
+                "and should be checked against it:\n" + points), chart
 
 
 class DocumentTools:
@@ -214,11 +238,42 @@ class DocumentTools:
             "documents": rows,
         }
 
+    @staticmethod
+    def chat_documents(config):
+        chat = config["configurable"].get("chat")
+        if chat is None:
+            return Document.objects.none()
+        vendor = config["configurable"]["vendor"]
+        shown = DocumentTools.card_document_ids(chat)
+        return (Document.objects.filter(Q(chat_messages__chat=chat) | Q(id__in=shown), vendor=vendor, is_active=True)
+                .distinct().order_by("-id"))
+
+    @staticmethod
+    def card_document_ids(chat):
+        messages = chat.messages.visible().filter(role="assistant", message__contains=Message.ARTIFACT_MARKER)
+        cards = [m.artifact for m in messages if m.artifact and m.artifact.get("kind") == "document_runs"]
+        return {row["id"] for card in cards for row in card.get("documents", []) if "id" in row}
+
+    @staticmethod
+    def vendor_documents(config):
+        return Document.objects.filter(vendor=config["configurable"]["vendor"], is_active=True).order_by("-id")
+
+    @tool
+    def list_chat_workflows(config: RunnableConfig) -> str:
+        """List the Temporal workflow IDs and current status of this chat's documents: chat files and links added to the knowledge base, and documents shown in a document card earlier in this chat. Includes completed ones. This is the default for any question about workflows or workflow IDs. Only when the user asks to see the pending or unfinished documents themselves, use list_unfinished_documents instead."""
+        docs = list(DocumentTools.chat_documents(config)[:DocumentTools.MAX_ROWS])
+        if not docs:
+            return "This chat has no documents yet: no chat file was added to the knowledge base and no document card was shown, so there are no workflow IDs to list."
+        lines = [
+            f"- {DocumentWorkflows.workflow_id(doc)}: {doc.source_label} ({doc.status}{'' if doc.workflow_run_id else ', never run'})"
+            for doc in docs
+        ]
+        return "Workflow IDs of this chat's documents, newest first, with their current status:\n" + "\n".join(lines)
+
     @tool(response_format="content_and_artifact")
     def list_unfinished_documents(config: RunnableConfig) -> tuple[str, dict]:
-        """Show the user every document that is not finished: documents running in Temporal right now (with a Cancel button and live progress) and documents waiting to be processed, i.e. pending or failed (with a Start button). Use this whenever the user asks about pending, unprocessed, failed, processing, running, queued or in-progress documents, or what still needs processing."""
-        vendor = config["configurable"]["vendor"]
-        active = Document.objects.filter(vendor=vendor, is_active=True).order_by("-created_at")
+        """Show the user all unfinished documents of the knowledge base as a list, not only this chat's: documents running in Temporal right now (with a Cancel button and live progress) and documents waiting to be processed, i.e. pending or failed (with a Start button). Use this ONLY when the user asks to see pending, unprocessed, failed, processing, running or in-progress documents. For questions about workflow IDs, use list_chat_workflows instead."""
+        active = DocumentTools.vendor_documents(config)
         running = list(active.filter(status__in=DocumentTools.RUNNING_STATUSES).exclude(workflow_run_id="")[:DocumentTools.MAX_ROWS + 1])
         waiting = list(active.filter(status__in=Document.UNPROCESSED_STATUSES)[:DocumentTools.MAX_ROWS + 1])
         docs = running + waiting
@@ -230,7 +285,7 @@ class DocumentTools:
         pending = ", ".join(str(doc.id) for doc in docs if doc.status == "pending") or "none"
         failed = ", ".join(str(doc.id) for doc in docs if doc.status == "error") or "none"
         more = f" (only the first {DocumentTools.MAX_ROWS} are listed, running ones first)" if truncated else ""
-        content = (f"Found {len(docs)} unfinished documents{more}. Document IDs by state: "
+        content = (f"Found {len(docs)} unfinished documents in the knowledge base{more}. Document IDs by state: "
                    f"running now: {running}; pending (never processed or canceled): {pending}; failed: {failed}. "
                    "This is the current state: when you mention a document, use only these IDs, never IDs from earlier messages. "
                    "They are shown to the user as a list: running rows have a Cancel button and live progress, the others a Start button. "
@@ -263,6 +318,85 @@ class DocumentTools:
         return content, DocumentTools.card("Processing started", [doc])
 
 
+class ChatFileTools:
+    NO_FILES = ("No file or link has been added to this chat yet. "
+                "Ask the user to upload one with the Upload file button or add one with Add link.")
+
+    @staticmethod
+    def chat(config):
+        return config["configurable"].get("chat")
+
+    @staticmethod
+    def describe(message):
+        kind = "link" if message.url else message.extension.lstrip(".")
+        line = f"- file id {message.id}: {message.file_label} ({kind})"
+        if message.is_dataset:
+            line += ", a table: use the dataset tools for it"
+        if message.document_id:
+            doc = message.document
+            line += f", in the knowledge base as {DocumentWorkflows.workflow_id(doc)} ({doc.status})"
+        return line
+
+    @staticmethod
+    def missing(file_id):
+        return f"There is no file with id {file_id} in this chat. Call list_chat_files to see this chat's files."
+
+    @tool
+    def list_chat_files(config: RunnableConfig) -> str:
+        """List every file and link the user added to this chat, with its file id, including ones from older messages you can no longer see. Call this when the user refers to a file you cannot find in the conversation, or asks which files this chat has."""
+        files = ChatFileService.for_chat(ChatFileTools.chat(config))
+        if not files:
+            return ChatFileTools.NO_FILES
+        return "Files in this chat:\n" + "\n".join(ChatFileTools.describe(message) for message in files)
+
+    @tool
+    def read_chat_file(file_id: int, config: RunnableConfig) -> str:
+        """Read the text of a PDF, text file or link the user added to this chat, to answer a question about it. Pick the file from the conversation by its name: each one is shown as [attached file: name, file id N]. If you cannot tell which file the user means, call list_chat_files or ask the user. CSV and Excel files are tables: use the dataset tools for those."""
+        message = ChatFileService.find(ChatFileTools.chat(config), file_id)
+        if message is None:
+            return ChatFileTools.missing(file_id)
+        if message.is_dataset:
+            return f"{message.file_label} is a table. Use list_datasets and query_dataset for it."
+        try:
+            text = ChatFileService.read_text(message)
+        except Exception as error:
+            return f"Error: could not read {message.file_label}: {error}"
+        if not text.strip():
+            return f"{message.file_label} has no readable text. A scanned PDF holds only images."
+        limit = ChatFileService.MAX_CHARS
+        if len(text) > limit:
+            text = text[:limit] + f"\n\n(text cut: only the first {limit} of {len(text)} characters are shown)"
+        return f"Text of {message.file_label}:\n\n{text}"
+
+    @tool(response_format="content_and_artifact")
+    def add_to_knowledge_base(file_id: int, config: RunnableConfig) -> tuple[str, dict]:
+        """Add a PDF, text file or link from this chat to the central knowledge base and start processing it in Temporal. Call this ONLY when the user explicitly asks to add a file to the knowledge base or central context. Never call it just because a file was uploaded or a question was asked about it."""
+        chat = ChatFileTools.chat(config)
+        message = ChatFileService.find(chat, file_id)
+        if message is None:
+            return ChatFileTools.missing(file_id), None
+        if message.is_dataset:
+            return f"{message.file_label} is a table. CSV and Excel files stay in the chat and cannot be added to the knowledge base.", None
+        try:
+            doc, created = ChatFileService.add_to_knowledge_base(message, config["configurable"]["vendor"], chat.user)
+        except Exception as error:
+            return f"Error: could not add {message.file_label} to the knowledge base: {error}", None
+        workflow_id = DocumentWorkflows.workflow_id(doc)
+        if not created:
+            content = (f"{message.file_label} is already in the knowledge base as document {doc.id} "
+                       f"(workflow {workflow_id}, status {doc.status}). Nothing new was added.")
+            return content, DocumentTools.card("Already in the knowledge base", [doc])
+        try:
+            ChatFileService.start_processing(doc, chat.user)
+        except Exception as error:
+            content = (f"Added {message.file_label} to the knowledge base as document {doc.id} ({workflow_id}), "
+                       f"but processing could not start: {error}. It can be started later.")
+            return content, DocumentTools.card("Added to the knowledge base", [doc])
+        content = (f"Added {message.file_label} to the knowledge base as document {doc.id} and started processing it "
+                   f"as Temporal workflow {workflow_id}. Its live progress is shown to the user.")
+        return content, DocumentTools.card("Added to the knowledge base", [doc])
+
+
 TOOL_REGISTRY = {
     "web_search": web_search,
     "search_documents": search_documents,
@@ -274,7 +408,12 @@ TOOL_REGISTRY = {
     "describe_dataset": DatasetTools.describe_dataset,
     "query_dataset": DatasetTools.query_dataset,
     "make_chart": DatasetTools.make_chart,
+    "make_chart_from_values": DatasetTools.make_chart_from_values,
     "list_unfinished_documents": DocumentTools.list_unfinished_documents,
     "start_document_processing": DocumentTools.start_document_processing,
+    "list_chat_workflows": DocumentTools.list_chat_workflows,
+    "list_chat_files": ChatFileTools.list_chat_files,
+    "read_chat_file": ChatFileTools.read_chat_file,
+    "add_to_knowledge_base": ChatFileTools.add_to_knowledge_base,
 }
 

@@ -24,11 +24,11 @@ class MessageInline(TabularInline):
 
     @admin.display(description="User")
     def user_message(self, obj):
-        return obj.message if obj.role == "user" else self.EMPTY
+        return obj.text if obj.role == "user" else self.EMPTY
 
     @admin.display(description="Assistant")
     def assistant_message(self, obj):
-        return obj.message if obj.role == "assistant" else self.EMPTY
+        return obj.text if obj.role == "assistant" else self.EMPTY
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -112,5 +112,5 @@ class MessageAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
 
     @admin.display(description="Message", ordering="message")
     def short_message(self, obj):
-        return Truncator(obj.message).chars(60)
+        return Truncator(obj.text).chars(60)
 

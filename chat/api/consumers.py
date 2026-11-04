@@ -1,7 +1,7 @@
 from asgiref.sync import async_to_sync
 from channels.generic.websocket import JsonWebsocketConsumer
 
-from analysis.services.datasets import DatasetService
+from chat.services.files import ChatFileService
 from chat.models import Chat
 from chat.services.chat import ChatService
 from chat.services.notifier import ChatNotifier
@@ -54,9 +54,9 @@ class ChatConsumer(ChatSocket):
         service = ChatService()
         user = self.scope["user"]
         token = content.get("file") or ""
-        file_path = DatasetService.path_from_token(token, self.chat, user) if token else ""
+        file_path = ChatFileService.path_from_token(token, self.chat, user) if token else ""
         if token and not file_path:
-            self.send_json({"event": "error", "detail": "The attached CSV could not be used. Upload it again."})
+            self.send_json({"event": "error", "detail": "The attached file could not be used. Upload it again."})
             return
 
         if not service.ask(self.chat, question, user, file_path):

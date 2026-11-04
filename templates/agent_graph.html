@@ -1,263 +1,71 @@
 {% extends "unfold/layouts/base.html" %}
+{% load static %}
 
 {% block content %}
 {{ agents_json|json_script:"agents-data" }}
 {{ available_tools|json_script:"tools-data" }}
 
-<style>
-  .agb { --ab-surface:#ffffff; --ab-surface-2:#f9fafb; --ab-border:#e5e7eb;
-         --ab-text:#374151; --ab-muted:#6b7280; --ab-heading:#111827;
-         --ab-primary:#7c3aed; --ab-primary-fg:#ffffff; --ab-grid:#eef0f4; }
-  .dark .agb { --ab-surface:#1a1d29; --ab-surface-2:#141620; --ab-border:#2a2e3d;
-         --ab-text:#d1d5db; --ab-muted:#9ca3af; --ab-heading:#f3f4f6;
-         --ab-primary:#7c3aed; --ab-primary-fg:#ffffff; --ab-grid:#20242f; }
+<link rel="stylesheet" href="{% static 'agent/drawflow/drawflow.min.css' %}">
+<link rel="stylesheet" href="{% static 'agent/agent_builder.css' %}">
 
-  .agb { display:flex; flex-direction:column; height:calc(100vh - 120px); min-height:480px;
-         margin:0 -16px -16px -16px; color:var(--ab-text); }
-
-  .agb-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-             padding:12px 16px; border-bottom:1px solid var(--ab-border); }
-  .agb-bar label { font-size:13px; color:var(--ab-muted); }
-  .agb select, .agb input[type=text], .agb textarea {
-    background:var(--ab-surface); border:1px solid var(--ab-border); color:var(--ab-text);
-    border-radius:8px; padding:7px 10px; font-size:13px; outline:none; }
-  .agb select:focus, .agb input:focus, .agb textarea:focus { border-color:var(--ab-primary); }
-  .ab-btn { background:var(--ab-surface); border:1px solid var(--ab-border); color:var(--ab-text);
-            border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; }
-  .ab-btn:hover { border-color:var(--ab-primary); color:var(--ab-heading); }
-  .ab-btn-primary { background:var(--ab-primary); border-color:var(--ab-primary); color:var(--ab-primary-fg); }
-  .ab-msg { font-size:13px; color:var(--ab-muted); margin-left:auto; }
-
-  .agb-canvas { position:relative; flex:1; overflow:hidden;
-    background-color:var(--ab-surface-2);
-    background-image:linear-gradient(var(--ab-grid) 1px,transparent 1px),
-                     linear-gradient(90deg,var(--ab-grid) 1px,transparent 1px);
-    background-size:24px 24px; }
-  .agb-edges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
-
-  .ab-node { position:absolute; width:230px; background:var(--ab-surface);
-    border:1px solid var(--ab-border); border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.12);
-    user-select:none; }
-  .ab-node.agent { border-color:var(--ab-primary); }
-  .ab-head { display:flex; align-items:center; justify-content:space-between;
-    padding:8px 10px; border-bottom:1px solid var(--ab-border); cursor:move;
-    font-size:12px; font-weight:700; color:var(--ab-heading); letter-spacing:.03em; text-transform:uppercase; }
-  .ab-node.agent .ab-head { color:var(--ab-primary); }
-  .ab-body { padding:10px; display:flex; flex-direction:column; gap:8px; }
-  .ab-body label { font-size:11px; color:var(--ab-muted); }
-  .ab-body input, .ab-body textarea, .ab-body select { width:100%; box-sizing:border-box; }
-  .ab-body textarea { resize:vertical; min-height:38px; font-family:inherit; }
-  .ab-x { cursor:pointer; color:var(--ab-muted); font-weight:700; padding:0 4px; }
-  /* same look as the editable fields, but clearly not typeable */
-  .agb [readonly] { color:var(--ab-muted); cursor:default; }
-  .agb [readonly]:focus { border-color:var(--ab-border); }
-  .ab-x:hover { color:#ef4444; }
-  .ab-check { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ab-text); text-transform:none; }
-</style>
-
-<div class="agb">
+<div class="agb" id="agentBuilder"
+     data-save-url="{% url 'agent_graph_save' %}"
+     data-prompts-url="{% url 'agent_graph_prompts' %}"
+     data-csrf="{{ csrf_token }}"
+     data-max-levels="{{ max_levels }}">
   <div class="agb-bar">
-    <label>Agent:</label>
+    <label for="agentPicker">Agent:</label>
     <select id="agentPicker"></select>
-    <button class="ab-btn" id="btnNew">+ New</button>
-    <button class="ab-btn" id="btnAddTool">+ Tool node</button>
-    <button class="ab-btn ab-btn-primary" id="btnSave">Save</button>
+    <button type="button" class="ab-btn" id="btnNew">+ New</button>
+    <span class="ab-spacer"></span>
     <span class="ab-msg" id="msg"></span>
+    <span class="ab-dirty" id="dirty" hidden>Unsaved changes</span>
+    <button type="button" class="ab-btn ab-btn-primary" id="btnSave">Save</button>
   </div>
 
-  <div class="agb-canvas" id="canvas">
-    <svg class="agb-edges" id="edges"></svg>
-
-    <div class="ab-node agent" id="agentNode" style="left:80px; top:80px;">
-      <div class="ab-head" data-drag>Agent</div>
-      <div class="ab-body">
-        <label>Name</label>
-        <input type="text" id="fLabel" placeholder="Assistant">
-        <label>Prompt name (Langfuse)</label>
-        <input type="text" id="fPrompt" placeholder="ASSISTANT_PROMPT">
-        <label>Description (router hint)</label>
-        <textarea id="fDesc" placeholder="general questions and document lookups"></textarea>
-        <label class="ab-check"><input type="checkbox" id="fDefault"> Default agent</label>
+  <div class="agb-main">
+    <div class="agb-stage">
+      <div class="agb-canvas" id="canvas"></div>
+      <div class="agb-zoom">
+        <button type="button" class="ab-btn" id="btnZoomIn" aria-label="Zoom in">+</button>
+        <button type="button" class="ab-btn" id="btnZoomOut" aria-label="Zoom out">&minus;</button>
+        <button type="button" class="ab-btn" id="btnFit">Fit</button>
+        <button type="button" class="ab-btn" id="btnArrange">Auto-arrange</button>
       </div>
+      <div class="agb-hint">Click an agent to edit it on the right. Drag the background to move. Ctrl + scroll to zoom. Double-click a tool for details. Click a line and press Delete to remove it.</div>
     </div>
+
+    <aside class="agb-side">
+      <section class="ab-settings">
+        <input type="text" id="fLabel" class="ab-title" placeholder="Agent name" aria-label="Agent name">
+        <input type="text" id="fPrompt" list="promptOptions" placeholder="Prompt name (Langfuse)" aria-label="Prompt name" title="Prompt name (Langfuse)" autocomplete="off">
+        <datalist id="promptOptions"></datalist>
+        <textarea id="fDesc" rows="2" placeholder="Description (router and parent agents read this)" aria-label="Description" title="Description (router and parent agents read this)"></textarea>
+        <div class="ab-flags">
+          <label class="ab-check"><input type="checkbox" id="fDefault"> Default</label>
+          <label class="ab-check"><input type="checkbox" id="fActive"> Active</label>
+        </div>
+      </section>
+
+      <div class="ab-search">
+        <input type="text" id="search" placeholder="Search tools and agents">
+      </div>
+
+      <details class="ab-group ab-group-agents" open>
+        <summary>Agents it can use <span id="agentCount"></span></summary>
+        <div class="ab-list" id="agentList"></div>
+      </details>
+
+      <details class="ab-group ab-group-tools" open>
+        <summary>Tools <span id="toolCount"></span></summary>
+        <div class="ab-list" id="toolList"></div>
+      </details>
+    </aside>
   </div>
+
+  <div class="ab-tooltip" id="tooltip" hidden></div>
 </div>
 
-<script>
-(function () {
-  const AGENTS = JSON.parse(document.getElementById("agents-data").textContent);
-  const TOOLS  = JSON.parse(document.getElementById("tools-data").textContent);
-  const SAVE_URL = "{% url 'agent_graph_save' %}";
-  const CSRF = "{{ csrf_token }}";
-
-  const canvas   = document.getElementById("canvas");
-  const edgesSvg = document.getElementById("edges");
-  const agentNode= document.getElementById("agentNode");
-  const picker   = document.getElementById("agentPicker");
-  const msg      = document.getElementById("msg");
-
-  let currentId = null;          // id of the agent being edited (null = new)
-  let toolSeq = 0;               // unique DOM ids for tool nodes
-
-  // ---- populate the agent dropdown ----
-  function refreshPicker() {
-    picker.innerHTML = "";
-    AGENTS.forEach(a => {
-      const o = document.createElement("option");
-      o.value = a.id; o.textContent = a.label + " (" + a.slug + ")";
-      picker.appendChild(o);
-    });
-  }
-
-  // ---- tool node creation ----
-  function addToolNode(tool, x, y) {
-    const id = "tool-" + (++toolSeq);
-    const node = document.createElement("div");
-    node.className = "ab-node tool";
-    node.dataset.nodeid = id;
-    node.style.left = (x ?? 420) + "px";
-    node.style.top  = (y ?? (80 + toolSeq * 120)) + "px";
-
-    const opts = TOOLS.map(t =>
-      `<option value="${t.name}" ${t.name === tool ? "selected" : ""}>${t.name}</option>`).join("");
-
-    node.innerHTML = `
-      <div class="ab-head" data-drag>Tool <span class="ab-x" data-remove>&times;</span></div>
-      <div class="ab-body">
-        <label>Tool</label>
-        <select class="tool-select">${opts}</select>
-        <label>Description</label>
-        <textarea class="tool-desc" rows="3" ></textarea>
-        <label>Inputs</label>
-        <input type="text" class="tool-args" >
-      </div>`;
-    canvas.appendChild(node);
-
-    // Show the picked tool's docstring and the inputs the LLM has to supply.
-    const select = node.querySelector(".tool-select");
-    function describe() {
-      const t = TOOLS.find(x => x.name === select.value) || {};
-      node.querySelector(".tool-desc").value = t.description || "";
-      node.querySelector(".tool-args").value =
-        t.args && t.args.length ? t.args.join(", ") : "none";
-    }
-    select.addEventListener("change", describe);
-    describe();
-
-    node.querySelector("[data-remove]").addEventListener("click", () => {
-      node.remove(); drawEdges();
-    });
-    drawEdges();
-    return node;
-  }
-
-  function toolNodes() { return [...canvas.querySelectorAll(".ab-node.tool")]; }
-
-  // ---- edges: line from agent centre to each tool centre ----
-  function centre(el) {
-    return { x: el.offsetLeft + el.offsetWidth / 2, y: el.offsetTop + el.offsetHeight / 2 };
-  }
-  function drawEdges() {
-    const a = centre(agentNode);
-    edgesSvg.innerHTML = toolNodes().map(n => {
-      const c = centre(n);
-      return `<line x1="${a.x}" y1="${a.y}" x2="${c.x}" y2="${c.y}"
-              stroke="var(--ab-primary)" stroke-width="2" opacity="0.6"/>`;
-    }).join("");
-  }
-
-  // ---- dragging any node by its header ----
-  let drag = null;
-  canvas.addEventListener("mousedown", e => {
-    const handle = e.target.closest("[data-drag]");
-    if (!handle) return;
-    const node = handle.closest(".ab-node");
-    drag = { node, dx: e.clientX - node.offsetLeft, dy: e.clientY - node.offsetTop };
-    e.preventDefault();
-  });
-  window.addEventListener("mousemove", e => {
-    if (!drag) return;
-    drag.node.style.left = Math.max(0, e.clientX - drag.dx) + "px";
-    drag.node.style.top  = Math.max(0, e.clientY - drag.dy) + "px";
-    drawEdges();
-  });
-  window.addEventListener("mouseup", () => { drag = null; });
-
-  // ---- load an agent into the canvas ----
-  function loadAgent(a) {
-    currentId = a ? a.id : null;
-    document.getElementById("fLabel").value   = a ? a.label : "";
-    document.getElementById("fPrompt").value  = a ? a.prompt_name : "";
-    document.getElementById("fDesc").value    = a ? a.description : "";
-    document.getElementById("fDefault").checked = a ? a.is_default : false;
-
-    toolNodes().forEach(n => n.remove());
-    toolSeq = 0;
-
-    const layout = (a && a.graph_json) ? a.graph_json : {};
-    if (layout.agent) { agentNode.style.left = layout.agent.x + "px"; agentNode.style.top = layout.agent.y + "px"; }
-    else { agentNode.style.left = "80px"; agentNode.style.top = "80px"; }
-
-    const savedPos = (layout.tools || []);
-    (a ? a.tools : []).forEach((t, i) => {
-      const p = savedPos.find(s => s.tool === t) || {};
-      addToolNode(t, p.x, p.y);
-    });
-    drawEdges();
-  }
-
-  // ---- gather canvas -> payload ----
-  function collect() {
-    const pos = { x: agentNode.offsetLeft, y: agentNode.offsetTop };
-    const toolList = [], toolPos = [];
-    toolNodes().forEach(n => {
-      const t = n.querySelector(".tool-select").value;
-      if (!toolList.includes(t)) toolList.push(t);      // dedupe
-      toolPos.push({ tool: t, x: n.offsetLeft, y: n.offsetTop });
-    });
-    return {
-      id: currentId,
-      label: document.getElementById("fLabel").value,
-      prompt_name: document.getElementById("fPrompt").value,
-      description: document.getElementById("fDesc").value,
-      is_default: document.getElementById("fDefault").checked,
-      tools: toolList,
-      graph_json: { agent: pos, tools: toolPos },
-    };
-  }
-
-  async function save() {
-    msg.textContent = "Saving…";
-    const res = await fetch(SAVE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
-      body: JSON.stringify(collect()),
-    });
-    const data = await res.json();
-    if (!data.ok) { msg.textContent = "Error: " + data.error; return; }
-
-    // upsert into local AGENTS list, reselect, redraw picker
-    const i = AGENTS.findIndex(a => a.id === data.agent.id);
-    if (i >= 0) AGENTS[i] = data.agent; else AGENTS.push(data.agent);
-    currentId = data.agent.id;
-    refreshPicker();
-    picker.value = currentId;
-    msg.textContent = "Saved ✓";
-  }
-
-  // ---- wire up controls ----
-  picker.addEventListener("change", () => {
-    const a = AGENTS.find(x => String(x.id) === picker.value);
-    if (a) loadAgent(a);
-  });
-  document.getElementById("btnNew").addEventListener("click", () => { loadAgent(null); picker.value = ""; });
-  document.getElementById("btnAddTool").addEventListener("click", () => addToolNode(TOOLS[0]));
-  document.getElementById("btnSave").addEventListener("click", save);
-
-  // ---- initial render ----
-  refreshPicker();
-  if (AGENTS.length) { picker.value = AGENTS[0].id; loadAgent(AGENTS[0]); }
-  else loadAgent(null);
-})();
-</script>
+<script src="{% static 'agent/drawflow/drawflow.min.js' %}"></script>
+<script src="{% static 'agent/agent_builder.js' %}"></script>
 {% endblock %}

@@ -4,65 +4,13 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import JsonResponse
 from django.shortcuts import redirect
-from django.core.exceptions import ValidationError
-from django.core.validators import URLValidator
 from temporalio.service import RPCError
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from scraper.models import Document
 from scraper.services.queue import DocumentQueue
 from scraper.temporal_workflow.temporal import DocumentWorkflows
 from scraper.tasks import DocumentTasks
-from chat.models import Chat, Message
-from chat.services.chat import ChatService
-from chat.services.notifier import ChatNotifier
-from agent.services.tools import DocumentTools
 
-
-class AddDocumentView(LoginRequiredMixin, View):
-    @staticmethod
-    def error(text):
-        return JsonResponse({"level": "error", "message": text}, status=400)
-
-    def post(self, request):
-        user = request.user
-        url = request.POST.get("url", "").strip()
-        source_type = request.POST.get("source_type", "")
-        if user.active_vendor is None:
-            return self.error("Pick a vendor first.")
-        if source_type not in dict(Document.SOURCE_CHOICES):
-            return self.error("Pick a document type.")
-        
-        try:
-            URLValidator(schemes=["http", "https"])(url)
-        except ValidationError:
-            return self.error("Enter a full http(s) link.")
-        chat = Chat.objects.visible_to(user).filter(id=request.POST.get("chat_id") or None).first()
-        
-        # Make row in document
-        doc = Document.objects.create(vendor=user.active_vendor, url=url, source_type=source_type, created_by=user, updated_by=user)
-        try:
-        # Start temporal workflow
-            workflow_id = DocumentWorkflows.start(doc, user=user)
-            level, text = "success", f"Document {doc.id} added. Processing started as {workflow_id}."
-        except Exception as exc:
-            level, text = "warning", f"Document {doc.id} added, but processing could not start: {exc}"
-
-        if chat:
-            service = ChatService()
-            question = f"Add {doc.get_source_type_display()} for processing: {url}"
-            renamed = service.title_from_first_message(chat, question, user)
-            doc.refresh_from_db()
-            saved = [
-                service.save_user_message(chat, question, user),
-                Message.objects.create(chat=chat, role="assistant", message=text,
-                                       artifact=DocumentTools.card("Added document", [doc]),
-                                       chat_session_key=chat.session_key, user=user, created_by=user, updated_by=user),
-            ]
-            for message in saved:
-                ChatNotifier.notify_chat(chat.id, {"event": "message", "message": service.serialize_message(message)})
-            if renamed:
-                ChatNotifier.notify_chat(chat.id, {"event": "renamed", "chat_id": chat.id, "title": chat.title})
-        return JsonResponse({"level": level, "id": doc.id, "message": text})
 
 class VisibleDocumentMixin:
     def visible_document(self, user, doc_id):

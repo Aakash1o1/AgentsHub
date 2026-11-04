@@ -1,0 +1,5 @@
+@media (min-width: 1024px) {
+    .agent-details .form-row.last .field-line:last-child > div:first-child {
+        align-self: center;
+    }
+}

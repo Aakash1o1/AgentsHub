@@ -1,9 +1,9 @@
 import threading
+
 from pathlib import Path
 
 import duckdb
-from django.core import signing
-from django.core.files.storage import default_storage
+from django.db.models import Q
 
 from chat.models import Message
 
@@ -11,10 +11,6 @@ from chat.models import Message
 class DatasetService:
     MAX_ROWS = 50
     QUERY_TIMEOUT_SECONDS = 10
-    MAX_UPLOAD_MB = 20
-    EXTENSIONS = (".csv",)
-    TOKEN_SALT = "chat-file"
-    TOKEN_MAX_AGE_SECONDS = 24 * 60 * 60
     SUPERUSER_ONLY_COLUMNS = ("salaries", "overtime", "other_salaries", "total_salary", "retirement",
                               "health_and_dental", "other_benefits", "total_benefits", "total_compensation")
     RECENT_ONLY_YEARS = 2
@@ -27,8 +23,12 @@ class DatasetService:
         return '"' + identifier.replace('"', '""') + '"'
 
     @staticmethod
-    def column_types(connection, path):
-        rows = connection.execute("DESCRIBE SELECT * FROM read_csv(?)", [path]).fetchall()
+    def reader(path):
+        return "read_xlsx" if Path(path).suffix.lower() == ".xlsx" else "read_csv"
+
+    @classmethod
+    def column_types(cls, connection, path):
+        rows = connection.execute(f"DESCRIBE SELECT * FROM {cls.reader(path)}(?)", [path]).fetchall()
         return [(row[0], row[1]) for row in rows]
 
     @classmethod
@@ -49,40 +49,14 @@ class DatasetService:
         finally:
             connection.close()
 
-    @classmethod
-    def upload_error(cls, upload):
-        if upload is None:
-            return "Choose a CSV file to upload."
-        if Path(upload.name).suffix.lower() not in cls.EXTENSIONS:
-            return "Only CSV files can be uploaded."
-        if upload.size == 0:
-            return "The file is empty."
-        if upload.size >cls.MAX_UPLOAD_MB * 1024 * 1024:
-            return f"The file is larger than {cls.MAX_UPLOAD_MB} MB."
-        return ""
-
-    @classmethod
-    def file_token(cls, path, chat, user):
-        return signing.dumps({"path": path, "chat": chat.id, "user": user.id}, salt=cls.TOKEN_SALT)
-
-    @classmethod
-    def path_from_token(cls, token, chat, user):
-        try:
-            data = signing.loads(token, salt=cls.TOKEN_SALT, max_age=cls.TOKEN_MAX_AGE_SECONDS)
-        except signing.BadSignature:
-            return ""
-        path = data.get("path", "")
-        if data.get("chat") != chat.id or data.get("user") != user.id or not default_storage.exists(path):
-            return ""
-        if Message.objects.filter(attachment=path).exists():
-            return ""
-        return path
-
     @staticmethod
     def for_chat(chat):
         if chat is None:
             return []
-        return list(Message.objects.visible().filter(chat=chat).exclude(attachment="").order_by("id"))
+        is_dataset = Q()
+        for extension in Message.DATASET_EXTENSIONS:
+            is_dataset |= Q(attachment__iendswith=extension)
+        return list(Message.objects.visible().filter(is_dataset, chat=chat).order_by("id"))
 
     @classmethod
     def period_column(cls, names):
@@ -144,7 +118,7 @@ class DatasetService:
         recent = cls.recent_filter(names)
         where = f" WHERE {recent}" if recent else ""
         connection.execute(
-            f"CREATE TABLE {cls.quote(message.table_name)} AS SELECT {select} FROM read_csv(?){where}",
+            f"CREATE TABLE {cls.quote(message.table_name)} AS SELECT {select} FROM {cls.reader(path)}(?){where}",
             [path],
         )
 

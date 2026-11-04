@@ -10,6 +10,15 @@ class AdminHtml:
         )
 
     @staticmethod
+    def chip_list(items):
+        css_class = (
+            "font-medium px-2 py-1 rounded-default text-xs whitespace-nowrap bg-base-100 "
+            "text-base-700 dark:bg-base-800 dark:text-base-200"
+        )
+        chips = format_html_join("", '<span class="{}">{}</span>', ((css_class, item) for item in items))
+        return format_html('<div class="flex flex-wrap gap-1.5">{}</div>', chips) if chips else "-"
+
+    @staticmethod
     def js_action_button(label, css_class, **data):
         attrs = format_html_join(
             "", ' data-{}="{}"', ((k.replace("_", "-"), v) for k, v in data.items())

@@ -21,3 +21,6 @@ class AgentClient:
         prompt = self.langfuse.get_prompt(name)
         return prompt.compile(**variables), prompt.config
 
+    def list_prompts(self):
+        return sorted(prompt.name for prompt in self.langfuse.api.prompts.list(limit=100).data)
+

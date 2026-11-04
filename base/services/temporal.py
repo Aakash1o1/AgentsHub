@@ -1,14 +1,29 @@
+import asyncio
+
 from asgiref.sync import async_to_sync
 from django.conf import settings
 from temporalio.client import Client
 
+from base.services.keycloak import KeycloakToken
+
 
 class TemporalClient:
     TASK_QUEUE = settings.TEMPORAL_TASK_QUEUE
+    TOKEN = KeycloakToken.for_django()
+    TOKEN_CHECK_SECONDS = 30
 
     @classmethod
-    async def connect(cls):
-        return await Client.connect(settings.TEMPORAL_ADDRESS, namespace=settings.TEMPORAL_NAMESPACE)
+    async def connect(cls, token=None):
+        token = token or cls.TOKEN
+        return await Client.connect(settings.TEMPORAL_ADDRESS, namespace=settings.TEMPORAL_NAMESPACE,
+                                    rpc_metadata=await token.header())
+
+    @classmethod
+    async def keep_token_fresh(cls, client, token=None):
+        token = token or cls.TOKEN
+        while True:
+            await asyncio.sleep(cls.TOKEN_CHECK_SECONDS)
+            client.rpc_metadata = await token.header()
 
     # This sends the workflow name, doc id, delay is added, and queue name
     @classmethod
@@ -34,10 +49,14 @@ class TemporalClient:
     @classmethod
     async def watch(cls, workflow_id, run_id):
         client = await cls.connect()
-        handle = client.get_workflow_handle(workflow_id, run_id=run_id)
-        history = await handle.fetch_history()
-        yield history.events
-        seen = history.events[-1].event_id if history.events else 0
-        async for event in handle.fetch_history_events(wait_new_event=True):
-            if event.event_id > seen:
-                yield [event]
+        refresher = asyncio.create_task(cls.keep_token_fresh(client))
+        try:
+            handle = client.get_workflow_handle(workflow_id, run_id=run_id)
+            history = await handle.fetch_history()
+            yield history.events
+            seen = history.events[-1].event_id if history.events else 0
+            async for event in handle.fetch_history_events(wait_new_event=True):
+                if event.event_id > seen:
+                    yield [event]
+        finally:
+            refresher.cancel()

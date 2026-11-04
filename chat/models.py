@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 from pathlib import Path
 from django.db import models, transaction
@@ -8,6 +9,7 @@ from django.utils.text import slugify
 from base.models import BaseModel
 from vendor.models import Vendor
 from base.utils import generate_ulid
+from scraper.models import Document
 
 
 class ChatFile:
@@ -62,14 +64,18 @@ class Message(BaseModel):
         ("user","User"),
         ("assistant", "Assistant"),
     ]
+    ARTIFACT_MARKER = "<!--artifact-->"
+    DATASET_EXTENSIONS = (".csv", ".xlsx")
 
     role = models.CharField(choices=ROLE_TYPE,max_length=20)
     message = models.TextField()
-    artifact = models.JSONField(null=True, blank=True)
     attachment = models.FileField(upload_to=ChatFile.upload_to, blank=True, max_length=255)
     chat = models.ForeignKey(Chat,on_delete=models.SET_NULL,null=True,blank=True,related_name="messages")
     chat_session_key = models.CharField(max_length=26, blank=True, default="")
     agent = models.ForeignKey("agent.Agent",on_delete=models.SET_NULL,null=True,blank=True,related_name="messages",)
+    url = models.URLField(blank=True)
+    source_type = models.CharField(choices=Document.SOURCE_CHOICES, max_length=20, blank=True)
+    document = models.ForeignKey(Document, on_delete=models.SET_NULL, null=True, blank=True, related_name="chat_messages")
 
     objects = models.Manager.from_queryset(MessageQuerySet)()
 
@@ -81,15 +87,69 @@ class Message(BaseModel):
     @property
     def message_types(self):
         types = []
-        if self.message:
+        if self.text:
             types.append("text")
         if self.attachment:
-            types.append(Path(self.attachment.name).suffix.lstrip(".").lower())
+            types.append(self.extension.lstrip("."))
+        if self.url:
+            types.append("link")
         return types
+
+    @classmethod
+    def join_content(cls, text, artifact=None):
+        text = text.replace(cls.ARTIFACT_MARKER, "")
+        if not artifact:
+            return text
+        return f"{text}\n{cls.ARTIFACT_MARKER}{json.dumps(artifact)}"
+
+    @classmethod
+    def split_content(cls, raw):
+        text, marker, tail = raw.rpartition(cls.ARTIFACT_MARKER)
+        if not marker:
+            return raw, None
+        try:
+            artifact = json.loads(tail)
+        except ValueError:
+            return raw, None
+        if not isinstance(artifact, dict):
+            return raw, None
+        return text.removesuffix("\n"), artifact
+
+    @property
+    def text(self):
+        if self.role != "assistant":
+            return self.message
+        return self.split_content(self.message)[0]
+
+    @property
+    def artifact(self):
+        if self.role != "assistant":
+            return None
+        return self.split_content(self.message)[1]
+
+    @property
+    def has_source(self):
+        return bool(self.attachment or self.url)
+
+    @property
+    def extension(self):
+        return Path(self.attachment.name).suffix.lower() if self.attachment else ""
+
+    @property
+    def is_dataset(self):
+        return self.extension in self.DATASET_EXTENSIONS
+
+    @property
+    def reading_type(self):
+        if self.url:
+            return self.source_type or "website"
+        return "pdf" if self.extension == ".pdf" else "text"
 
     @property
     def file_label(self):
-        return Path(self.attachment.name).name if self.attachment else ""
+        if self.attachment:
+            return Path(self.attachment.name).name
+        return self.url
 
     @property
     def table_name(self):

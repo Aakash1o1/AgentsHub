@@ -1,0 +1,17 @@
+{% extends 'unfold/layouts/unauthenticated.html' %}
+
+{% load unfold %}
+
+{% block title %}
+    {{ title }} | {{ site_title }}
+{% endblock %}
+
+{% block content %}
+    {% include "unfold/helpers/unauthenticated_title.html" with title=site_title subtitle=title %}
+
+    <p class="mb-6">Your user is deactivated in this app. Ask an administrator to activate it.</p>
+
+    {% component "unfold/components/button.html" with href=switch_url variant="primary" class="w-full" %}
+        Log in as someone else
+    {% endcomponent %}
+{% endblock %}

@@ -1,0 +1,57 @@
+<style>
+  .hd-vendor, .hd-user { display:flex; align-items:center; height:36px; border-radius:999px; font-size:13px;
+                         border:1px solid #e5e7eb; background:#fff; color:#374151; }
+  .dark .hd-vendor, .dark .hd-user { border-color:#2c3146; background:#1a1d2b; color:#d6dae4; }
+  .hd-vendor { position:relative; gap:6px; padding:0 10px 0 12px; transition:border-color .15s, background .15s; }
+  .hd-vendor:hover { border-color:#8b5cf6; }
+  [x-cloak] { display:none !important; }
+  .dark .hd-vendor:hover { background:#20243a; }
+  .hd-vendor-icon { font-size:18px; color:#7c3aed; }
+  .dark .hd-vendor-icon { color:#a78bfa; }
+  .hd-vendor-wrap { position:relative; margin:0; }
+  button.hd-vendor { cursor:pointer; font-family:inherit; }
+  .hd-vendor.hd-open { border-color:#8b5cf6; box-shadow:0 0 0 3px rgba(139,92,246,.15); }
+  .hd-vendor-name { font-weight:600; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hd-vendor-caret { font-size:18px; color:#9ca3af; transition:transform .15s; }
+  .hd-vendor.hd-open .hd-vendor-caret { transform:rotate(180deg); }
+  .hd-menu { position:absolute; right:0; top:calc(100% + 8px); z-index:60; min-width:220px; max-height:320px; overflow-y:auto;
+             padding:6px; border-radius:12px; border:1px solid #e5e7eb; background:#fff; box-shadow:0 12px 32px rgba(0,0,0,.15); }
+  .dark .hd-menu { border-color:#2c3146; background:#1a1d2b; box-shadow:0 16px 40px rgba(0,0,0,.5); }
+  .hd-menu-label { padding:6px 10px 8px; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:#9ca3af; }
+  .dark .hd-menu-label { color:#6b7280; }
+  .hd-option { width:100%; display:flex; align-items:center; gap:10px; padding:8px 10px; border:0; border-radius:8px;
+               background:transparent; color:#374151; font-size:13px; text-align:left; cursor:pointer; font-family:inherit; }
+  .dark .hd-option { color:#d6dae4; }
+  .hd-option:hover { background:#f3f0ff; }
+  .dark .hd-option:hover { background:#232741; }
+  .hd-option.hd-active { background:rgba(139,92,246,.12); color:#6d28d9; font-weight:600; }
+  .dark .hd-option.hd-active { background:rgba(139,92,246,.18); color:#ddd6fe; }
+  .hd-option-dot { width:24px; height:24px; flex-shrink:0; border-radius:7px; display:flex; align-items:center; justify-content:center;
+                   font-size:12px; font-weight:700; text-transform:uppercase; color:#6d28d9; background:#ede9fe; }
+  .dark .hd-option-dot { color:#c4b5fd; background:#2a2547; }
+  .hd-option.hd-active .hd-option-dot { color:#fff; background:linear-gradient(135deg, #a78bfa, #6d28d9); }
+  .hd-option-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hd-check { font-size:18px; color:#8b5cf6; }
+  .hd-user { gap:8px; padding:0 4px 0 4px; }
+  .hd-avatar { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+               font-size:13px; font-weight:700; color:#fff; text-transform:uppercase;
+               background:linear-gradient(135deg, #a78bfa, #6d28d9); }
+  .hd-name { font-weight:600; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hd-user form { display:flex; margin:0; }
+  .hd-logout { width:28px; height:28px; border:0; border-radius:50%; display:flex; align-items:center; justify-content:center;
+               background:transparent; color:#9ca3af; cursor:pointer; transition:background .15s, color .15s; }
+  .hd-logout:hover { background:rgba(220,38,38,.12); color:#ef4444; }
+  .hd-logout .material-symbols-outlined { font-size:18px; }
+  .hd-divider { width:1px; height:20px; background:#e5e7eb; }
+  .dark .hd-divider { background:#2c3146; }
+</style>
+
+<div class="hd-user">
+  <span class="hd-avatar">{{ user.get_short_name|default:user.get_username|slice:":1" }}</span>
+  <span class="hd-name">{{ user.get_short_name|default:user.get_username }}</span>
+  <span class="hd-divider"></span>
+  <form method="post" action="{% url 'admin:logout' %}">
+    {% csrf_token %}
+    <button type="submit" class="hd-logout" title="Log out" aria-label="Log out"><span class="material-symbols-outlined">logout</span></button>
+  </form>
+</div>

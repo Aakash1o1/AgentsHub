@@ -81,8 +81,7 @@ class ChatService:
         return Message.objects.create(
             chat=chat,
             role="assistant",
-            message=answer,
-            artifact=artifact,
+            message=Message.join_content(answer, artifact),
             agent=agent,
             chat_session_key=chat.session_key,
             user=user,
@@ -94,7 +93,7 @@ class ChatService:
         return {
             "id": message.id,
             "role": message.role,
-            "message": message.message,
+            "message": message.text,
             "agent": message.agent.label if message.agent else "",
             "artifact": message.artifact,
             "attachment": self.serialize_attachment(message),
@@ -102,15 +101,15 @@ class ChatService:
 
     @staticmethod
     def serialize_attachment(message):
-        if not message.attachment:
+        if not message.has_source:
             return None
-        return {"name": message.file_label}
+        return {"name": message.file_label, "kind": "link" if message.url else "file"}
 
 
     # Function to summarize chat and save it in summary field
     def summarize_chat(self, chat, user):
         message = chat.messages.visible().order_by("created_at")
-        convo = "\n".join(f"{m.role}: {m.message}" for m in message)
+        convo = "\n".join(f"{m.role}: {m.text}" for m in message)
         prompt = f"Summarize this conversation briefly:\n\n{convo}"
         summary = self.deepseek.ask_deepseek(prompt)
         chat.summary = summary

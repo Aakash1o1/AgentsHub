@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'oauth2_provider',
+    'mozilla_django_oidc',
 
     # Local App
     'base.apps.BaseConfig',
@@ -128,6 +129,48 @@ TEMPORAL_NAMESPACE = os.environ.get('TEMPORAL_NAMESPACE', 'default')
 TEMPORAL_TASK_QUEUE = os.environ.get('TEMPORAL_TASK_QUEUE', 'docs')
 
 TEMPORAL_UI_URL = os.environ.get('TEMPORAL_UI_URL', 'http://localhost:8233')
+
+KEYCLOAK_URL = os.environ.get('KEYCLOAK_URL', 'http://localhost:8180')
+
+KEYCLOAK_REALM = os.environ.get('KEYCLOAK_REALM', 'rag')
+
+KEYCLOAK_DJANGO_CLIENT_SECRET = os.environ.get('KEYCLOAK_DJANGO_CLIENT_SECRET', '')
+
+KEYCLOAK_WORKER_CLIENT_SECRET = os.environ.get('KEYCLOAK_WORKER_CLIENT_SECRET', '')
+
+KEYCLOAK_OIDC_URL = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect"
+
+AUTHENTICATION_BACKENDS = ['authentication.services.backends.KeycloakBackend']
+
+OIDC_RP_CLIENT_ID = 'rag-django'
+
+OIDC_RP_CLIENT_SECRET = KEYCLOAK_DJANGO_CLIENT_SECRET
+
+OIDC_RP_SIGN_ALGO = 'RS256'
+
+OIDC_RP_SCOPES = 'openid email profile'
+
+OIDC_OP_AUTHORIZATION_ENDPOINT = f"{KEYCLOAK_OIDC_URL}/auth"
+
+OIDC_OP_TOKEN_ENDPOINT = f"{KEYCLOAK_OIDC_URL}/token"
+
+OIDC_OP_USER_ENDPOINT = f"{KEYCLOAK_OIDC_URL}/userinfo"
+
+OIDC_OP_JWKS_ENDPOINT = f"{KEYCLOAK_OIDC_URL}/certs"
+
+OIDC_OP_LOGOUT_ENDPOINT = f"{KEYCLOAK_OIDC_URL}/logout"
+
+OIDC_OP_LOGOUT_URL_METHOD = 'authentication.services.backends.keycloak_logout_url'
+
+OIDC_CREATE_USER = True
+
+OIDC_STORE_ID_TOKEN = True
+
+LOGIN_REDIRECT_URL = '/'
+
+LOGIN_REDIRECT_URL_FAILURE = '/login-failed/'
+
+LOGOUT_REDIRECT_URL = '/admin/login/'
 
 OIDC_RSA_PRIVATE_KEY_FILE = Path(os.environ.get('OIDC_RSA_PRIVATE_KEY_FILE', BASE_DIR / '.secrets' / 'oidc.key'))
 
@@ -216,6 +259,7 @@ UNFOLD = {
                 "items": [
                     {"title": "Documents", "icon": "description", "link": reverse_lazy("admin:scraper_document_changelist")},
                     {"title": "Chunks", "icon": "dataset", "link": reverse_lazy("admin:scraper_chunk_changelist")},
+                    {"title": "Agents", "icon": "smart_toy", "link": reverse_lazy("admin:agent_agent_changelist")},
                     {"title": "Temporal workflows", "icon": "schema",
                      "link": f"{TEMPORAL_UI_URL}/namespaces/{TEMPORAL_NAMESPACE}/workflows",
                      "permission": lambda request: request.user.is_superuser},

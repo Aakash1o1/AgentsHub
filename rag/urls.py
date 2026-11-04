@@ -2,6 +2,9 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from mozilla_django_oidc.views import OIDCLogoutView
+
+from authentication.api.views import KeycloakLoginView, LoginFailedView
 from vendor.api.views import AdminSetVendorView
 
 urlpatterns = [
@@ -11,7 +14,11 @@ urlpatterns = [
     path('api/v1/agent/', include('agent.api.urls')),
     path('api/v1/analysis/', include('analysis.api.urls')),
     path('admin/set-vendor/', AdminSetVendorView.as_view(), name='admin_set_vendor'),
+    path('admin/login/', KeycloakLoginView.as_view()),
+    path('admin/logout/', OIDCLogoutView.as_view()),
     path('admin/', admin.site.urls),
+    path('oidc/', include('mozilla_django_oidc.urls')),
+    path('login-failed/', LoginFailedView.as_view(), name='login_failed'),
     path('o/', include('authentication.api.urls')),
 ]
 

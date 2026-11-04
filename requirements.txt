@@ -44,6 +44,7 @@ langgraph-prebuilt==1.1.0
 langgraph-sdk==0.4.3
 langsmith==0.11.1
 lxml==6.1.2
+mozilla-django-oidc==5.0.2
 multidict==6.7.1
 numpy==2.5.2
 openai==3.3.1

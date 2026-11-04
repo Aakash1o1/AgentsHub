@@ -19,11 +19,12 @@ unfold/layouts/skeleton.html -- does not work here:
 
 ON UPGRADING django-unfold: re-diff this against the packaged
 unfold/helpers/userlinks.html. Everything below except the single
-vendor_switcher include is a verbatim copy.
+vendor_switcher and user_chip includes is a verbatim copy.
 {% endcomment %}
 
 <div class="flex flex-row gap-4 items-center ml-auto">
     {% include "components/vendor_switcher.html" %}
+    {% include "components/user_chip.html" %}
 
     {% if environment %}
         {% include "unfold/helpers/label.html" with text=environment.0 type=environment.1 %}

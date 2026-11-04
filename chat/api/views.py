@@ -1,8 +1,12 @@
 from django.shortcuts import render, redirect
-from chat.models import Chat
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
+from django.http import JsonResponse
+from chat.models import Chat, Message
 from scraper.models import Document
 from chat.services.chat import ChatService
-from analysis.services.datasets import DatasetService
+from chat.services.files import ChatFileService
+from chat.services.notifier import ChatNotifier
 from django.contrib import admin
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views import View
@@ -21,13 +25,13 @@ class ChatHomeView(LoginRequiredMixin, View):
         context = admin.site.each_context(request)
         context.update({
             "is_fullwidth": "1",
+            "title": "Chat",
             "user": user,
             "vendors": user.vendors.all(),
             "vendor": user.active_vendor,
             "chats": chats,
             "open_chat": open_chat,
             "chat_messages": open_chat.messages.visible() if open_chat else [],
-            "document_types": Document.SOURCE_CHOICES,
         })
         return render(request, "chat_admin.html", context)
 
@@ -52,7 +56,7 @@ class SendMessageView(LoginRequiredMixin, View):
         question = request.POST.get("question")
         chat = Chat.objects.visible_to(user).filter(id=chat_id).first() if user.active_vendor else None
         token = request.POST.get("file") or ""
-        file_path = DatasetService.path_from_token(token, chat, user) if chat and token else ""
+        file_path = ChatFileService.path_from_token(token, chat, user) if chat and token else ""
         if chat and question:
             ChatService().ask(chat, question, user, file_path)
         if chat:
@@ -69,3 +73,35 @@ class SummarizeView(LoginRequiredMixin, View):
             return redirect(f"/?chat={chat.id}")
         return redirect("chat_home")
 
+
+class AddChatLinkView(LoginRequiredMixin, View):
+    REPLY = "Link saved to this chat. Ask a question about it, or ask me to add it to the knowledge base."
+
+    @staticmethod
+    def error(text):
+        return JsonResponse({"level": "error", "message": text}, status=400)
+
+    def post(self, request):
+        user = request.user
+        url = request.POST.get("url", "").strip()
+        source_type = request.POST.get("source_type") or ChatFileService.link_type(url)
+        chat = Chat.objects.visible_to(user).filter(id=request.POST.get("chat_id") or None).first() if user.active_vendor else None
+        if chat is None:
+            return self.error("Open a chat first.")
+        if source_type not in dict(Document.SOURCE_CHOICES):
+            return self.error("Unknown link type.")
+        try:
+            URLValidator(schemes=["http", "https"])(url)
+        except ValidationError:
+            return self.error("Enter a full http(s) link.")
+
+        service = ChatService()
+        renamed = service.title_from_first_message(chat, url, user)
+        link = ChatFileService.save_link(chat, url, source_type, user)
+        reply = Message.objects.create(chat=chat, role="assistant", message=self.REPLY,
+                                       chat_session_key=chat.session_key, user=user, created_by=user, updated_by=user)
+        for message in (link, reply):
+            ChatNotifier.notify_chat(chat.id, {"event": "message", "message": service.serialize_message(message)})
+        if renamed:
+            ChatNotifier.notify_chat(chat.id, {"event": "renamed", "chat_id": chat.id, "title": chat.title})
+        return JsonResponse({"level": "success", "id": link.id, "message": self.REPLY})

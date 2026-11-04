@@ -12,3 +12,4 @@ class User(AbstractUser):
         related_name="active_users",
     )
     vendors = models.ManyToManyField(Vendor, related_name="users", blank=True)
+    keycloak_id = models.CharField(max_length=36, unique=True, null=True, blank=True)
