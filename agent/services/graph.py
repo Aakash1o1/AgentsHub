@@ -1,7 +1,5 @@
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
 
 from agent.services.tools import TOOL_REGISTRY
 from agent.services.client import AgentClient
@@ -18,28 +16,7 @@ class AgentRunner:
     def get_agent_graph(self, agent):
         compiled, config = self.client.get_prompt(agent.prompt_name)
         tools = [TOOL_REGISTRY[name] for name in agent.tools if name in TOOL_REGISTRY]
-        tools += [self.sub_agent_tool(sub) for sub in agent.sub_agents.filter(is_active=True)]
         return create_react_agent(self.client.get_llm(config), tools=tools, prompt=compiled)
-
-    def sub_agent_tool(self, sub):
-        description = (
-            f"Ask the {sub.label} agent to do a task and get its answer back. {sub.description} "
-            "It cannot see this conversation, so put every detail it needs in the task, including any file ids."
-        )
-
-        @tool(f"ask_{sub.slug}", description=description, response_format="content_and_artifact")
-        def ask(task: str, config: RunnableConfig) -> tuple[str, dict]:
-            configurable = config["configurable"]
-            try:
-                result = self.get_agent_graph(sub).invoke(
-                    {"messages": [{"role": "user", "content": task}]},
-                    config={"configurable": {"vendor": configurable["vendor"], "chat": configurable.get("chat")}},
-                )
-            except Exception as error:
-                return f"Error: the {sub.label} agent failed: {error}", None
-            return result["messages"][-1].content, self.find_artifact(result["messages"])
-
-        return ask
 
     ROUTER_FILE_LIMIT = 10
 

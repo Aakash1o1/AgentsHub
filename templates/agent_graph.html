@@ -11,8 +11,7 @@
 <div class="agb" id="agentBuilder"
      data-save-url="{% url 'agent_graph_save' %}"
      data-prompts-url="{% url 'agent_graph_prompts' %}"
-     data-csrf="{{ csrf_token }}"
-     data-max-levels="{{ max_levels }}">
+     data-csrf="{{ csrf_token }}">
   <div class="agb-bar">
     <label for="agentPicker">Agent:</label>
     <select id="agentPicker"></select>
@@ -32,7 +31,7 @@
         <button type="button" class="ab-btn" id="btnFit">Fit</button>
         <button type="button" class="ab-btn" id="btnArrange">Auto-arrange</button>
       </div>
-      <div class="agb-hint">Click an agent to edit it on the right. Drag the background to move. Ctrl + scroll to zoom. Double-click a tool for details. Click a line and press Delete to remove it.</div>
+      <div class="agb-hint">Drag the background to move. Ctrl + scroll to zoom. Double-click a tool for details. Click a line and press Delete to remove it.</div>
     </div>
 
     <aside class="agb-side">
@@ -40,7 +39,7 @@
         <input type="text" id="fLabel" class="ab-title" placeholder="Agent name" aria-label="Agent name">
         <input type="text" id="fPrompt" list="promptOptions" placeholder="Prompt name (Langfuse)" aria-label="Prompt name" title="Prompt name (Langfuse)" autocomplete="off">
         <datalist id="promptOptions"></datalist>
-        <textarea id="fDesc" rows="2" placeholder="Description (router and parent agents read this)" aria-label="Description" title="Description (router and parent agents read this)"></textarea>
+        <textarea id="fDesc" rows="2" placeholder="Description (the router reads this)" aria-label="Description" title="Description (the router reads this)"></textarea>
         <div class="ab-flags">
           <label class="ab-check"><input type="checkbox" id="fDefault"> Default</label>
           <label class="ab-check"><input type="checkbox" id="fActive"> Active</label>
@@ -48,13 +47,8 @@
       </section>
 
       <div class="ab-search">
-        <input type="text" id="search" placeholder="Search tools and agents">
+        <input type="text" id="search" placeholder="Search tools">
       </div>
-
-      <details class="ab-group ab-group-agents" open>
-        <summary>Agents it can use <span id="agentCount"></span></summary>
-        <div class="ab-list" id="agentList"></div>
-      </details>
 
       <details class="ab-group ab-group-tools" open>
         <summary>Tools <span id="toolCount"></span></summary>

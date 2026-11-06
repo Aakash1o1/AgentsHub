@@ -10,7 +10,6 @@ from django.views import View
 
 from agent.models import Agent
 from agent.services.client import AgentClient
-from agent.services.sub_agents import SubAgentRules
 from agent.services.tools import TOOL_REGISTRY
 
 
@@ -24,7 +23,6 @@ class AgentPayload:
             "description": agent.description,
             "prompt_name": agent.prompt_name,
             "tools": agent.tools,
-            "sub_agents": [sub.id for sub in agent.sub_agents.all()],
             "is_default": agent.is_default,
             "is_active": agent.is_active,
             "graph_json": agent.graph_json,
@@ -37,7 +35,7 @@ class AgentGraphView(LoginRequiredMixin, View):
         vendor = user.active_vendor
         agents = []
         if vendor:
-            rows = vendor.agents.prefetch_related("sub_agents").order_by("id")
+            rows = vendor.agents.order_by("id")
             agents = [AgentPayload.build(agent) for agent in rows]
 
         context = admin.site.each_context(request)
@@ -45,7 +43,6 @@ class AgentGraphView(LoginRequiredMixin, View):
             "is_fullwidth": "1",
             "vendor": vendor,
             "agents_json": agents,
-            "max_levels": SubAgentRules.MAX_LEVELS,
             "available_tools": [
                 {"name": name, "description": t.description, "args": list(t.args)}
                 for name, t in TOOL_REGISTRY.items()
@@ -85,12 +82,6 @@ class AgentGraphSaveView(LoginRequiredMixin, View):
 
         agent_id = data.get("id")
 
-        sub_ids = data.get("sub_agents")
-        if sub_ids is not None:
-            error = SubAgentRules.check(vendor, agent_id, sub_ids)
-            if error:
-                return JsonResponse({"ok": False, "error": error}, status=400)
-
         base = slugify(label) or "agent"
         slug = base
         taken = vendor.agents.exclude(id=agent_id or 0).values_list("slug", flat=True)
@@ -122,9 +113,6 @@ class AgentGraphSaveView(LoginRequiredMixin, View):
                 agent.save()
             else:
                 agent = Agent.objects.create(vendor=vendor, created_by=user, **fields)
-
-            if sub_ids is not None:
-                agent.sub_agents.set(sub_ids)
 
             if agent.is_default:
                 vendor.agents.exclude(id=agent.id).filter(is_default=True).update(is_default=False, updated_by=user)
