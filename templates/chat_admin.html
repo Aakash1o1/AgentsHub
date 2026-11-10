@@ -3,7 +3,7 @@
 
 {% block content %}
 <link rel="stylesheet" href="{% static 'scraper/doc_actions.css' %}">
-<link rel="stylesheet" href="{% static 'scraper/doc_list.css' %}?v=2">
+<link rel="stylesheet" href="{% static 'scraper/doc_list.css' %}?v=3">
 <style>
   /* ---- theme tokens: light defaults, .dark overrides (matches Unfold) ---- */
   .ragchat {
@@ -300,7 +300,8 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script src="{% static 'scraper/doc_actions.js' %}"></script>
-<script src="{% static 'scraper/doc_list.js' %}?v=2"></script>
+<script src="{% static 'scraper/doc_list.js' %}?v=4"></script>
+<script src="{% static 'chat/file_summary.js' %}"></script>
 <script>
   function showChatTime(el) {
     const when = new Date(el.getAttribute("datetime"));
@@ -425,7 +426,7 @@
       });
     }
 
-    const ARTIFACT_RENDERERS = {chart: drawChart, document_runs: RunsCard.draw};
+    const ARTIFACT_RENDERERS = {chart: drawChart, document_runs: RunsCard.draw, file_summary: SummaryCard.draw};
 
     function drawArtifact(bubble, artifact) {
       const draw = ARTIFACT_RENDERERS[artifact.kind];

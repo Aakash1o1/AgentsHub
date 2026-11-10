@@ -45,6 +45,15 @@ class TemporalClient:
     def cancel(cls, workflow_id, run_id):
         async_to_sync(cls.cancel_async)(workflow_id, run_id)
 
+    @classmethod
+    async def list_async(cls, query):
+        client = await cls.connect()
+        return [execution async for execution in client.list_workflows(query)]
+
+    @classmethod
+    def list(cls, query):
+        return async_to_sync(cls.list_async)(query)
+
     # Whatch is used to get currentl state of workflow
     @classmethod
     async def watch(cls, workflow_id, run_id):
@@ -60,3 +69,18 @@ class TemporalClient:
                     yield [event]
         finally:
             refresher.cancel()
+
+
+class RunningJobs:
+    @staticmethod
+    def query(job_classes):
+        types = ", ".join(f"'{job.WORKFLOW_TYPE}'" for job in job_classes)
+        return f"ExecutionStatus = 'Running' AND WorkflowType IN ({types})"
+
+    @classmethod
+    def fetch(cls, job_classes):
+        return sorted(TemporalClient.list(cls.query(job_classes)), key=lambda execution: execution.start_time)
+
+    @staticmethod
+    def owner(execution, job_classes):
+        return next(job for job in job_classes if job.WORKFLOW_TYPE == execution.workflow_type)

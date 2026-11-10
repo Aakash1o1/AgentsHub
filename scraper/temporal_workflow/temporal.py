@@ -7,18 +7,32 @@ from scraper.temporal_workflow.workflows import DocumentWorkflow
 
 class DocumentWorkflows(TemporalClient):
     STARTABLE_STATUSES = Document.UNPROCESSED_STATUSES
-
-    @staticmethod
-    def workflow_id(doc):
-        return f"document-{doc.id}"
+    WORKFLOW_TYPE = DocumentWorkflow.__name__
+    WORKFLOW_PREFIX = "document-"
 
     @classmethod
-    def start(cls, doc, delay_seconds=0, user=None):
+    def workflow_id(cls, doc):
+        return f"{cls.WORKFLOW_PREFIX}{doc.id}"
+
+    @classmethod
+    def doc_id(cls, workflow_id):
+        return int(workflow_id.removeprefix(cls.WORKFLOW_PREFIX))
+
+    @classmethod
+    def job_label(cls, workflow_id):
+        return f"doc {cls.doc_id(workflow_id)}"
+
+    @staticmethod
+    def job_socket_path(workflow_id, run_id):
+        return f"/ws/scraper/workflow/{workflow_id}/{run_id}/progress/"
+
+    @classmethod
+    def start(cls, doc, user=None):
         workflow_id = cls.workflow_id(doc)
-        run_id = cls.send(DocumentWorkflow.run, [doc.id, delay_seconds], workflow_id)
+        run_id = cls.send(DocumentWorkflow.run, [doc.id], workflow_id)
         Document.objects.filter(id=doc.id).update(workflow_run_id=run_id)
 
-        fields = {"status": "waiting" if delay_seconds else "queued", "updated_at": timezone.now()}
+        fields = {"status": "queued", "updated_at": timezone.now()}
         if user is not None:
             fields["updated_by"] = user
         Document.objects.filter(id=doc.id, status__in=cls.STARTABLE_STATUSES).update(**fields)

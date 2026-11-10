@@ -1,5 +1,4 @@
 from django.views import View
-from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import JsonResponse
@@ -24,7 +23,7 @@ class VisibleDocumentMixin:
 
 # Pushes document to kafka queue using base functions we made in services
 class EnqueueDocumentView(LoginRequiredMixin, VisibleDocumentMixin, View):
-    MODES = ("process", "process_now", "schedule", "process_temporal", "schedule_temporal")
+    MODES = ("process", "process_now", "schedule", "process_temporal")
 
     def reply(self, request, level, text):
         if request.headers.get("Accept", "").startswith("application/json"):
@@ -46,9 +45,8 @@ class EnqueueDocumentView(LoginRequiredMixin, VisibleDocumentMixin, View):
             if mode == "schedule":
                 delay = DocumentTasks.schedule(doc, user=user)
                 level, text = "success", f"Document {doc.id} scheduled in {delay}s."
-            elif mode in ("process_temporal", "schedule_temporal"):
-                delay = settings.DOCUMENT_SCHEDULE_DELAY_SECONDS if mode == "schedule_temporal" else 0
-                workflow_id = DocumentWorkflows.start(doc, delay_seconds=delay, user=user)
+            elif mode == "process_temporal":
+                workflow_id = DocumentWorkflows.start(doc, user=user)
                 level, text = "success", f"Document {doc.id} started as Temporal workflow {workflow_id}."
             else:
                 priority = mode == "process_now"

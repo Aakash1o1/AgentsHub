@@ -138,11 +138,6 @@
             return m ? m + "m " + s + "s" : s + "s";
         }
 
-        static until(iso) {
-            const ms = new Date(iso) - Date.now();
-            return ms > 0 ? DocProgress.seconds(ms) : "now";
-        }
-
         static duration(step) {
             if (!step.started_at) {
                 return "";
@@ -156,14 +151,6 @@
             return '<div class="dp-bar dp-bar-' + tone + '"><div style="width:' + width + '%"></div></div>';
         }
 
-        static timerHtml(step) {
-            const start = new Date(step.started_at);
-            const span = new Date(step.fires_at) - start;
-            const done = step.state === "done" ? span : Date.now() - start;
-            const text = step.state === "running" ? "fires in " + DocProgress.until(step.fires_at) : "fired";
-            return DocProgress.bar(span > 0 ? (done / span) * 100 : 100, "amber") + '<div class="dp-sub">' + text + "</div>";
-        }
-
         static batchHtml(step) {
             if (step.total == null) {
                 return "";
@@ -173,7 +160,7 @@
         }
 
         static stepHtml(step) {
-            const extra = step.fires_at ? DocProgress.timerHtml(step) : step.key === "embed_batch" ? DocProgress.batchHtml(step) : "";
+            const extra = step.key === "embed_batch" ? DocProgress.batchHtml(step) : "";
             const error = step.last_error ? '<div class="dp-error">' + DocProgress.escape(step.last_error) + "</div>" : "";
             return (
                 '<li class="dp-step dp-' + step.state + '">' +

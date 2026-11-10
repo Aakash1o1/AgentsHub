@@ -15,7 +15,7 @@ from scraper.tasks import DocumentTasks
 
 
 STATUS_COLORS = {"pending": "gray", "queued": "blue", "scheduled": "purple",
-                 "processing": "orange", "waiting": "purple", "extracting": "orange",
+                 "processing": "orange", "extracting": "orange",
                  "embedding": "orange", "completed": "green", "error": "red"}
 # Register your models here.
 
@@ -43,8 +43,6 @@ class DocumentAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
          "hint": "Celery -- embedded after a delay", "colour": "#0f766e"},
         {"mode": "process_temporal", "label": "Process", "group": "Temporal",
          "hint": "Temporal workflow -- resumes after a crash, saves per batch", "colour": "#db2777"},
-        {"mode": "schedule_temporal", "label": "Schedule 2 min", "group": "Temporal",
-         "hint": "Temporal timer -- the wait is stored on the Temporal server", "colour": "#b45309"},
     ]
 
 

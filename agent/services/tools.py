@@ -7,10 +7,12 @@ from pgvector.django import L2Distance
 from scraper.services.client import OllamaClient
 from scraper.models import Chunk, Document
 from scraper.services.progress import DocumentProgress
+from base.services.temporal import RunningJobs
 from scraper.temporal_workflow.temporal import DocumentWorkflows
 from chat.models import Message
 from chat.services.chat import ChatService
 from chat.services.files import ChatFileService
+from chat.temporal_workflow.temporal import ChatFileSummaries
 from analysis.services.datasets import DatasetService
 from ddgs import DDGS
 from langchain_core.tools import tool
@@ -200,7 +202,6 @@ class DatasetTools:
 
 class DocumentTools:
     MAX_ROWS = 50
-    RUNNING_STATUSES = ("queued", "waiting", "extracting", "embedding")
 
     # Make details of the artifact shoin details
     @staticmethod
@@ -270,27 +271,66 @@ class DocumentTools:
         ]
         return "Workflow IDs of this chat's documents, newest first, with their current status:\n" + "\n".join(lines)
 
+    JOB_CLASSES = (DocumentWorkflows, ChatFileSummaries)
+
+    @staticmethod
+    def job_card(title, executions):
+        rows = []
+        for execution in executions:
+            job = RunningJobs.owner(execution, DocumentTools.JOB_CLASSES)
+            rows.append({
+                "workflow_id": execution.id,
+                "name": job.job_label(execution.id),
+                "readonly": True,
+                "status": "running",
+                "run_id": execution.run_id,
+                "started_at": execution.start_time.isoformat(),
+                "progress_url": job.job_socket_path(execution.id, execution.run_id),
+            })
+        return {
+            "kind": "document_runs",
+            "title": title,
+            "fetched_at": timezone.now().isoformat(),
+            "truncated": False,
+            "documents": rows,
+        }
+
+    @tool(response_format="content_and_artifact")
+    def list_running_jobs() -> tuple[str, dict]:
+        """Show the jobs running in Temporal right now, read from Temporal itself, with live progress: document processing jobs and chat file summary jobs. Use this when the user asks for pending tasks or jobs, or what is being processed at the moment. For documents that are not processed yet, use list_unfinished_documents instead."""
+        try:
+            executions = RunningJobs.fetch(DocumentTools.JOB_CLASSES)
+        except Exception as error:
+            return f"Error: could not read the running jobs from Temporal: {error}", None
+        if not executions:
+            return "No jobs are running in Temporal right now.", None
+        jobs = ", ".join(
+            f"{execution.id} ({RunningJobs.owner(execution, DocumentTools.JOB_CLASSES).job_label(execution.id)})"
+            for execution in executions
+        )
+        content = (f"{len(executions)} jobs are running in Temporal right now: {jobs}. "
+                   "They are shown to the user as a list with live progress. "
+                   "Do not repeat the list; summarise it in one sentence.")
+        return content, DocumentTools.job_card("Running jobs", executions)
+
     @tool(response_format="content_and_artifact")
     def list_unfinished_documents(config: RunnableConfig) -> tuple[str, dict]:
-        """Show the user all unfinished documents of the knowledge base as a list, not only this chat's: documents running in Temporal right now (with a Cancel button and live progress) and documents waiting to be processed, i.e. pending or failed (with a Start button). Use this ONLY when the user asks to see pending, unprocessed, failed, processing, running or in-progress documents. For questions about workflow IDs, use list_chat_workflows instead."""
+        """Show the user all documents of the knowledge base that are not processed yet, not only this chat's: pending (never processed or canceled) or failed, each with a Start button. Use this ONLY when the user asks to see pending, unprocessed or failed documents. For jobs running right now, use list_running_jobs. For questions about workflow IDs, use list_chat_workflows instead."""
         active = DocumentTools.vendor_documents(config)
-        running = list(active.filter(status__in=DocumentTools.RUNNING_STATUSES).exclude(workflow_run_id="")[:DocumentTools.MAX_ROWS + 1])
-        waiting = list(active.filter(status__in=Document.UNPROCESSED_STATUSES)[:DocumentTools.MAX_ROWS + 1])
-        docs = running + waiting
+        docs = list(active.filter(status__in=Document.UNPROCESSED_STATUSES)[:DocumentTools.MAX_ROWS + 1])
         if not docs:
-            return "There are no unfinished documents: nothing is running and nothing is waiting to be processed.", None
+            return "There are no unprocessed documents: nothing is pending or failed.", None
         truncated = len(docs) > DocumentTools.MAX_ROWS
         docs = docs[:DocumentTools.MAX_ROWS]
-        running = ", ".join(f"{doc.id} ({doc.status})" for doc in docs if doc.status in DocumentTools.RUNNING_STATUSES) or "none"
         pending = ", ".join(str(doc.id) for doc in docs if doc.status == "pending") or "none"
         failed = ", ".join(str(doc.id) for doc in docs if doc.status == "error") or "none"
-        more = f" (only the first {DocumentTools.MAX_ROWS} are listed, running ones first)" if truncated else ""
-        content = (f"Found {len(docs)} unfinished documents in the knowledge base{more}. Document IDs by state: "
-                   f"running now: {running}; pending (never processed or canceled): {pending}; failed: {failed}. "
+        more = f" (only the newest {DocumentTools.MAX_ROWS} are listed)" if truncated else ""
+        content = (f"Found {len(docs)} unprocessed documents in the knowledge base{more}. Document IDs by state: "
+                   f"pending (never processed or canceled): {pending}; failed: {failed}. "
                    "This is the current state: when you mention a document, use only these IDs, never IDs from earlier messages. "
-                   "They are shown to the user as a list: running rows have a Cancel button and live progress, the others a Start button. "
+                   "They are shown to the user as a list, each with a Start button. "
                    "Do not repeat the list; summarise it in one sentence.")
-        return content, DocumentTools.card("Unfinished documents", docs, truncated)
+        return content, DocumentTools.card("Unprocessed documents", docs, truncated)
 
     @tool(response_format="content_and_artifact")
     def start_document_processing(document_id: str, config: RunnableConfig) -> tuple[str, dict]:
@@ -351,7 +391,7 @@ class ChatFileTools:
 
     @tool
     def read_chat_file(file_id: int, config: RunnableConfig) -> str:
-        """Read the text of a PDF, text file or link the user added to this chat, to answer a question about it. Pick the file from the conversation by its name: each one is shown as [attached file: name, file id N]. If you cannot tell which file the user means, call list_chat_files or ask the user. CSV and Excel files are tables: use the dataset tools for those."""
+        """Read the text of a PDF, text file or link the user added to this chat, to answer a question about it. Pick the file from the conversation by its name: each one is shown as [attached file: name, file id N]. If you cannot tell which file the user means, call list_chat_files or ask the user. CSV and Excel files are tables: use the dataset tools for those. Use this also when the user asks to summarise a file; only when they ask to process it, use process_chat_file."""
         message = ChatFileService.find(ChatFileTools.chat(config), file_id)
         if message is None:
             return ChatFileTools.missing(file_id)
@@ -397,6 +437,37 @@ class ChatFileTools:
         return content, DocumentTools.card("Added to the knowledge base", [doc])
 
 
+    @tool(response_format="content_and_artifact")
+    def process_chat_file(file_id: int, config: RunnableConfig) -> tuple[str, dict]:
+        """Process a PDF, text file or link from this chat: a Temporal workflow summarises it piece by piece, saves the summary and posts it in the chat as a new message when it is done. Call this ONLY when the user asks to PROCESS a file they name. Pick the file by its name: each one is shown as [attached file: name, file id N]. If the user asks to summarise a file, use read_chat_file and summarise it yourself instead. If the user mentions the knowledge base or central context, use add_to_knowledge_base instead."""
+        chat = ChatFileTools.chat(config)
+        message = ChatFileService.find(chat, file_id)
+        if message is None:
+            return ChatFileTools.missing(file_id), None
+        if message.is_dataset:
+            return f"{message.file_label} is a table. Use list_datasets and query_dataset for it.", None
+        workflow_id = ChatFileSummaries.workflow_id(message)
+        try:
+            run_id = ChatFileSummaries.start(message)
+        except WorkflowAlreadyStartedError:
+            return f"{message.file_label} is already being processed as Temporal workflow {workflow_id}.", None
+        except Exception as error:
+            return f"Error: could not start processing {message.file_label}: {error}", None
+        content = (f"Started processing {message.file_label} as Temporal workflow {workflow_id}. "
+                   "A card shows its live progress and the summary will be posted in this chat when it is done. "
+                   "Tell the user this in one sentence; do not summarise the file yourself.")
+        card = {
+            "kind": "file_summary",
+            "title": f"Processing {message.file_label}",
+            "file_id": message.id,
+            "name": message.file_label,
+            "workflow_id": workflow_id,
+            "run_id": run_id,
+            "progress_url": ChatFileSummaries.socket_path(message, run_id),
+        }
+        return content, card
+
+
 TOOL_REGISTRY = {
     "web_search": web_search,
     "search_documents": search_documents,
@@ -410,10 +481,12 @@ TOOL_REGISTRY = {
     "make_chart": DatasetTools.make_chart,
     "make_chart_from_values": DatasetTools.make_chart_from_values,
     "list_unfinished_documents": DocumentTools.list_unfinished_documents,
+    "list_running_jobs": DocumentTools.list_running_jobs,
     "start_document_processing": DocumentTools.start_document_processing,
     "list_chat_workflows": DocumentTools.list_chat_workflows,
     "list_chat_files": ChatFileTools.list_chat_files,
     "read_chat_file": ChatFileTools.read_chat_file,
     "add_to_knowledge_base": ChatFileTools.add_to_knowledge_base,
+    "process_chat_file": ChatFileTools.process_chat_file,
 }
 

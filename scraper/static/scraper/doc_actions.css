@@ -265,7 +265,6 @@
 
 .dp-bar-green > div { background: var(--dp-green); }
 .dp-bar-blue > div { background: var(--dp-blue); }
-.dp-bar-amber > div { background: var(--dp-amber); }
 
 .dp-steps {
     list-style: none;

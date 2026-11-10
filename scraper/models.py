@@ -11,7 +11,6 @@ class Document(BaseModel):
         ("queued","Queued"),
         ("scheduled","Scheduled"),
         ("processing","Processing"),
-        ("waiting","Waiting"),
         ("extracting","Extracting"),
         ("embedding","Embedding"),
         ("completed","Completed"),

@@ -42,13 +42,13 @@
     class RunRow {
         static LABELS = { start: "Start", starting: "Starting…", cancel: "Cancel", canceling: "Canceling…" };
         static RESTARTABLE = ["Canceled", "Failed", "Terminated", "Timed out"];
-        static SEGMENT_WEIGHTS = { embed_batch: 4 };
-        static STEP_STATUS = { mark_waiting: "waiting", timer: "waiting", mark_extracting: "extracting", extract_text: "extracting", mark_embedding: "embedding", embed_batch: "embedding" };
+        static SEGMENT_WEIGHTS = { embed_batch: 4, summarize_piece: 4 };
+        static STEP_STATUS = { mark_extracting: "extracting", extract_text: "extracting", mark_embedding: "embedding", embed_batch: "embedding" };
         static CLOSED_PILLS = { Completed: ["completed", "completed"], Failed: ["failed", "error"], Canceled: ["canceled", "pending"] };
 
         constructor(doc) {
             this.doc = doc;
-            this.state = doc.startable ? "start" : doc.status === "completed" ? "done" : "cancel";
+            this.state = doc.readonly ? "watch" : doc.startable ? "start" : doc.status === "completed" ? "done" : "cancel";
             this.message = null;
             this.run = null;
             this.socket = null;
@@ -135,6 +135,10 @@
 
         update() {
             const status = this.run.progress ? this.run.progress.status : "Running";
+            if (this.doc.readonly) {
+                this.render();
+                return;
+            }
             if (status === "Completed") {
                 this.state = "done";
             } else if (RunRow.RESTARTABLE.includes(status)) {
@@ -183,7 +187,7 @@
             const segments = steps.map(function (step) {
                 let fill = step.state === "done" ? 100 : 0;
                 let counter = "";
-                if (step.key === "embed_batch") {
+                if ("total" in step) {
                     if (step.total && step.state !== "done") {
                         fill = (step.done / step.total) * 100;
                     }
@@ -219,10 +223,11 @@
             this.pill.textContent = pill[0];
             this.pill.className = "rl-pill rl-pill-" + pill[1];
             const run = doc.run_id ? " (" + doc.run_id.slice(0, 8) + "…)" : "";
-            this.meta.textContent = "#" + doc.id + " · " + doc.workflow_id + " · " + doc.source_type +
-                " · last run: " + (progress ? progress.status : doc.last_run) + run;
-            const done = this.state === "done";
-            this.button.hidden = done;
+            this.meta.textContent = doc.readonly
+                ? doc.workflow_id + " · started " + Html.when(doc.started_at) + run
+                : "#" + doc.id + " · " + doc.workflow_id + " · " + doc.source_type +
+                  " · last run: " + (progress ? progress.status : doc.last_run) + run;
+            this.button.hidden = this.state === "done" || this.state === "watch";
             this.button.textContent = RunRow.LABELS[this.state] || "";
             this.button.disabled = this.state === "starting" || this.state === "canceling";
             this.button.className = "rl-btn rl-btn-" + (this.state.startsWith("cancel") ? "cancel" : "start");
@@ -255,7 +260,7 @@
             card.append(head, list, foot);
             bubble.appendChild(card);
             rows.forEach(function (row) {
-                if (row.state === "cancel") {
+                if (row.state === "cancel" || row.state === "watch") {
                     row.watch();
                 }
             });

@@ -42,15 +42,10 @@ class DocumentWorkflow:
         return result
 
     @workflow.run
-    async def run(self, doc_id: int, delay_seconds: int) -> int:
+    async def run(self, doc_id: int) -> int:
         acts = DocumentActivities
 
         try:
-            if delay_seconds:
-                await self.step(acts.mark_stage, [doc_id, "waiting"], self.DB_STEP)
-                self.show_progress("timer")
-                await workflow.sleep(timedelta(seconds=delay_seconds))
-
             await self.step(acts.mark_stage, [doc_id, "extracting"], self.DB_STEP)
             total = await self.step(acts.extract_text, [doc_id], self.WORK_STEP)
 
