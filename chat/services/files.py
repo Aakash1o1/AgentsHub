@@ -73,6 +73,11 @@ class ChatFileService:
         messages = Message.objects.visible().filter(chat=chat).select_related("document").order_by("id")
         return [message for message in messages if message.has_source]
 
+    @staticmethod
+    def for_chats(chats):
+        messages = Message.objects.visible().filter(chat__in=chats).select_related("document", "chat").order_by("-id")
+        return [message for message in messages if message.has_source]
+
     @classmethod
     def find(cls, chat, file_id):
         return next((message for message in cls.for_chat(chat) if message.id == file_id), None)

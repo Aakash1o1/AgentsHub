@@ -2,7 +2,6 @@ import math
 
 import requests
 from django.db import close_old_connections
-from django.utils import timezone
 from pypdf.errors import PyPdfError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -78,11 +77,6 @@ class ChatFileSummaryActivities:
             f"{parts}"
         )
         return self.deepseek.ask_deepseek(prompt)
-
-    @activity.defn
-    def save_summary(self, message_id, summary):
-        close_old_connections()
-        Message.objects.filter(id=message_id).update(summary=summary, updated_at=timezone.now())
 
     @activity.defn
     def post_summary(self, message_id, summary):

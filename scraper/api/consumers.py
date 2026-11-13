@@ -3,6 +3,7 @@ import asyncio
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
+from chat.services.access import TaskAccess
 from scraper.api.views import VisibleDocumentMixin
 from scraper.services.progress import DocumentProgress
 
@@ -13,6 +14,9 @@ class ProgressStreamMixin:
             self.task.cancel()
 
     async def begin(self, progress):
+        if not await database_sync_to_async(TaskAccess.allowed)(self.scope["user"]):
+            await self.close()
+            return
         await self.accept()
         self.task = asyncio.create_task(self.stream(progress))
 

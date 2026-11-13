@@ -8,7 +8,6 @@ class ChatFileSummaryProgress:
         ("read_text", "Read text"),
         ("summarize_piece", "Summarise pieces"),
         ("combine", "Combine"),
-        ("save_summary", "Save summary"),
         ("post_summary", "Post in chat"),
     )
 
@@ -23,6 +22,7 @@ class ChatFileSummaryProgress:
         self.steps["summarize_piece"].update(done=0, total=None)
         self.keys_by_event = {}
         self.status = "Running"
+        self.paused = False
 
     def apply(self, event):
         kind = event.WhichOneof("attributes")
@@ -32,13 +32,19 @@ class ChatFileSummaryProgress:
 
         if kind in DocumentProgress.CLOSED:
             self.status = DocumentProgress.CLOSED[kind]
+        elif kind in DocumentProgress.PAUSE_EVENTS:
+            self.paused = DocumentProgress.PAUSE_EVENTS[kind]
         elif kind == "activity_task_scheduled_event_attributes":
             key = attrs.activity_type.name
+            if key not in self.steps:
+                return
             self.keys_by_event[event.event_id] = key
             self.steps[key].setdefault("started_at", at)
             self.steps[key]["state"] = "running"
         elif kind == "activity_task_completed_event_attributes":
-            key = self.keys_by_event[attrs.scheduled_event_id]
+            key = self.keys_by_event.get(attrs.scheduled_event_id)
+            if key is None:
+                return
             step = self.steps[key]
             if key == "read_text":
                 plan = DocumentProgress.decode(attrs.result.payloads) or {}
@@ -50,8 +56,10 @@ class ChatFileSummaryProgress:
             else:
                 step.update(state="done", ended_at=at)
         elif kind in ("activity_task_failed_event_attributes", "activity_task_timed_out_event_attributes"):
-            step = self.steps[self.keys_by_event[attrs.scheduled_event_id]]
-            step.update(state="failed", ended_at=at, last_error=attrs.failure.message)
+            key = self.keys_by_event.get(attrs.scheduled_event_id)
+            if key is None:
+                return
+            self.steps[key].update(state="failed", ended_at=at, last_error=attrs.failure.message)
 
     def snapshot(self):
         pieces = self.steps["summarize_piece"]
@@ -63,6 +71,8 @@ class ChatFileSummaryProgress:
                     step["state"] = "stopped"
         return {
             "status": self.status,
+            "paused": self.paused and self.status == "Running",
+            "control_url": DocumentProgress.control_url(self.workflow_id, self.run_id),
             "parallel": ChatFileSummaryWorkflow.PARALLEL,
             "steps_done": sum(step["state"] == "done" for step in steps),
             "steps_total": len(steps),

@@ -2,6 +2,8 @@ import json
 import math
 from datetime import timezone
 
+from django.urls import reverse
+
 from scraper.temporal_workflow.temporal import DocumentWorkflows
 from scraper.temporal_workflow.workflows import DocumentWorkflow
 
@@ -23,6 +25,10 @@ class DocumentProgress:
         "workflow_execution_timed_out_event_attributes": "Timed out",
         "workflow_execution_continued_as_new_event_attributes": "Continued as new",
     }
+    PAUSE_EVENTS = {
+        "workflow_execution_paused_event_attributes": True,
+        "workflow_execution_unpaused_event_attributes": False,
+    }
 
     @staticmethod
     def socket_path(doc_id):
@@ -33,6 +39,10 @@ class DocumentProgress:
         if len(payloads) <= index or not payloads[index].data:
             return None
         return json.loads(payloads[index].data)
+
+    @staticmethod
+    def control_url(workflow_id, run_id):
+        return reverse("workflow_control", args=[workflow_id, run_id])
 
     @staticmethod
     def moment(timestamp):
@@ -56,6 +66,7 @@ class DocumentProgress:
         self.steps["embed_batch"].update(done=0, total=None)
         self.keys_by_event = {}
         self.status = "Running"
+        self.paused = False
 
     def activity_key(self, attrs):
         name = attrs.activity_type.name
@@ -71,6 +82,8 @@ class DocumentProgress:
 
         if kind in self.CLOSED:
             self.status = self.CLOSED[kind]
+        elif kind in self.PAUSE_EVENTS:
+            self.paused = self.PAUSE_EVENTS[kind]
         elif kind == "activity_task_scheduled_event_attributes":
             key = self.activity_key(attrs)
             if key not in self.steps:
@@ -107,6 +120,8 @@ class DocumentProgress:
         return {
             "document": self.document,
             "status": self.status,
+            "paused": self.paused and self.status == "Running",
+            "control_url": self.control_url(self.workflow_id, self.run_id),
             "steps_done": sum(step["state"] == "done" for step in steps),
             "steps_total": len(steps),
             "steps": steps,

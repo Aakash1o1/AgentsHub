@@ -6,7 +6,7 @@
 {{ available_tools|json_script:"tools-data" }}
 
 <link rel="stylesheet" href="{% static 'agent/drawflow/drawflow.min.css' %}">
-<link rel="stylesheet" href="{% static 'agent/agent_builder.css' %}">
+<link rel="stylesheet" href="{% static 'agent/agent_builder.css' %}?v=2">
 
 <div class="agb" id="agentBuilder"
      data-save-url="{% url 'agent_graph_save' %}"
@@ -29,21 +29,14 @@
         <button type="button" class="ab-btn" id="btnZoomIn" aria-label="Zoom in">+</button>
         <button type="button" class="ab-btn" id="btnZoomOut" aria-label="Zoom out">&minus;</button>
         <button type="button" class="ab-btn" id="btnFit">Fit</button>
-        <button type="button" class="ab-btn" id="btnArrange">Auto-arrange</button>
       </div>
-      <div class="agb-hint">Drag the background to move. Ctrl + scroll to zoom. Double-click a tool for details. Click a line and press Delete to remove it.</div>
+      <div class="agb-hint">Drag the background to move. Ctrl + scroll to zoom. Drag a box to move it. Tick tools in the list on the right; hover a tool for details.</div>
     </div>
 
     <aside class="agb-side">
       <section class="ab-settings">
         <input type="text" id="fLabel" class="ab-title" placeholder="Agent name" aria-label="Agent name">
-        <input type="text" id="fPrompt" list="promptOptions" placeholder="Prompt name (Langfuse)" aria-label="Prompt name" title="Prompt name (Langfuse)" autocomplete="off">
-        <datalist id="promptOptions"></datalist>
-        <textarea id="fDesc" rows="2" placeholder="Description (the router reads this)" aria-label="Description" title="Description (the router reads this)"></textarea>
-        <div class="ab-flags">
-          <label class="ab-check"><input type="checkbox" id="fDefault"> Default</label>
-          <label class="ab-check"><input type="checkbox" id="fActive"> Active</label>
-        </div>
+        <label class="ab-check"><input type="checkbox" id="fDefault"> Default agent (used when the router is unsure)</label>
       </section>
 
       <div class="ab-search">
@@ -57,9 +50,10 @@
     </aside>
   </div>
 
+  <datalist id="promptOptions"></datalist>
   <div class="ab-tooltip" id="tooltip" hidden></div>
 </div>
 
 <script src="{% static 'agent/drawflow/drawflow.min.js' %}"></script>
-<script src="{% static 'agent/agent_builder.js' %}"></script>
+<script src="{% static 'agent/agent_builder.js' %}?v=2"></script>
 {% endblock %}

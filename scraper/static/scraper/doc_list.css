@@ -106,17 +106,6 @@
     color: var(--rc-primary-fg);
 }
 
-.rl-btn-cancel {
-    background: transparent;
-    border-color: #dc2626;
-    color: #dc2626;
-}
-
-.rl-btn-cancel:hover:not(:disabled) {
-    background: #dc2626;
-    color: #fff;
-}
-
 .rl-btn:disabled {
     opacity: 0.6;
     cursor: default;
@@ -161,6 +150,13 @@
     font-size: 12px;
     margin-bottom: 4px;
     color: var(--rc-text);
+}
+
+.rl-live-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
 }
 
 .rl-segs {
@@ -225,6 +221,19 @@
 .rl-seg-stopped .rl-seg-fill {
     width: 100% !important;
     background: var(--dp-amber);
+}
+
+.dp-paused .rl-seg-running .rl-seg-track {
+    background: var(--dp-line);
+    animation: none;
+}
+
+.dp-paused .rl-seg-fill {
+    background: #9ca3af;
+}
+
+.dp-paused .rl-seg-count {
+    color: var(--dp-muted);
 }
 
 @keyframes rl-stripes {

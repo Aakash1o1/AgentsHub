@@ -41,12 +41,12 @@ class SoftDeleteAdminMixin:
             is_active=active, updated_by=request.user, updated_at=timezone.now()
         )
 
-    @admin.action(description="Soft delete selected %(verbose_name_plural)s")
+    @admin.action(description="Soft delete selected %(verbose_name_plural)s", permissions=["change"])
     def soft_delete_selected(self, request, queryset):
         count = self.set_active(request, queryset, False)
         self.message_user(request, f"{count} {self.model._meta.verbose_name_plural} soft deleted.")
 
-    @admin.action(description="Restore selected %(verbose_name_plural)s")
+    @admin.action(description="Restore selected %(verbose_name_plural)s", permissions=["change"])
     def restore_selected(self, request, queryset):
         count = self.set_active(request, queryset, True)
         self.message_user(request, f"{count} {self.model._meta.verbose_name_plural} restored.")

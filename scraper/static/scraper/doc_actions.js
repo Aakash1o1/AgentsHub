@@ -69,15 +69,11 @@
         static open(button) {
             const url = button.dataset.url;
             const modes = JSON.parse(button.dataset.modes);
-            const progressUrl = button.dataset.progressUrl;
             const dark = DocActions.isDark();
-            const progressHtml = progressUrl
-                ? '<button type="button" class="doc-run-btn">Last Temporal run</button>'
-                : "";
 
             Swal.fire({
                 title: "Document #" + button.dataset.doc,
-                html: DocActions.optionsHtml(modes) + progressHtml,
+                html: DocActions.optionsHtml(modes),
                 showConfirmButton: false,
                 showCancelButton: true,
                 cancelButtonText: "Cancel",
@@ -90,12 +86,6 @@
                             DocActions.submit(url, el.dataset.mode);
                         });
                     });
-                    const run = popup.querySelector(".doc-run-btn");
-                    if (run) {
-                        run.addEventListener("click", function () {
-                            DocProgress.open(button.dataset.doc, progressUrl, button.dataset.cancelUrl);
-                        });
-                    }
                 },
             });
         }
@@ -115,8 +105,9 @@
     class DocProgress {
         static SELECTOR = ".doc-progress-btn";
         static TICK_MS = 1000;
+        static DENIED = "Progress hidden: you don't have access to Temporal tasks.";
         static ICONS = { done: "\u2713", running: "", failed: "\u2715", stopped: "\u25A0", pending: "" };
-        static STATUS_TONES = { Running: "blue", Completed: "green" };
+        static STATUS_TONES = { Running: "blue", Completed: "green", Paused: "amber" };
 
         static escape(text) {
             const div = document.createElement("div");
@@ -178,24 +169,9 @@
             );
         }
 
-        static cancelHtml(state) {
-            if (!state.cancelUrl || !state.progress) {
-                return "";
-            }
-            const running = state.progress.status === "Running";
-            let label = "Cancel";
-            if (state.progress.status === "Canceled") {
-                label = "Canceled";
-            } else if (state.canceling && running) {
-                label = "Canceling\u2026";
-            }
-            const disabled = !running || state.canceling ? " disabled" : "";
-            return '<button type="button" class="dp-cancel"' + disabled + ">" + label + "</button>";
-        }
-
         static headHtml(doc, state) {
             const progress = state.progress;
-            const status = progress ? progress.status : "";
+            const status = progress ? DocProgress.statusLabel(progress) : "";
             const tone = DocProgress.STATUS_TONES[status] || (status ? "red" : "gray");
             const meta = progress
                 ? DocProgress.escape(progress.document.type) + " \u00B7 " + DocProgress.escape(progress.document.source)
@@ -207,33 +183,15 @@
                 (meta ? '<div class="dp-meta" title="' + meta + '">' + meta + "</div>" : "") +
                 "</div>" +
                 '<div class="dp-head-side">' +
-                DocProgress.cancelHtml(state) +
+                RunControls.html(state) +
                 (status ? '<span class="dp-status dp-status-' + tone + '">' + DocProgress.escape(status) + "</span>" : "") +
                 "</div>" +
                 "</div>"
             );
         }
 
-        static cancel(state, render) {
-            state.canceling = true;
-            render();
-            fetch(state.cancelUrl, {
-                method: "POST",
-                headers: { "X-CSRFToken": DocActions.csrfToken() },
-                credentials: "same-origin",
-            })
-                .then(function (response) {
-                    return response.json().then(function (body) {
-                        if (!response.ok) {
-                            throw new Error(body.error || "Could not cancel.");
-                        }
-                    });
-                })
-                .catch(function (err) {
-                    state.canceling = false;
-                    state.error = err.message;
-                    render();
-                });
+        static statusLabel(progress) {
+            return progress.paused ? "Paused" : progress.status;
         }
 
         static stepsHtml(progress) {
@@ -253,16 +211,27 @@
             const body = state.progress
                 ? DocProgress.stepsHtml(state.progress)
                 : state.error ? "" : '<div class="dp-loading">Loading\u2026</div>';
+            const paused = state.progress && state.progress.paused ? " dp-paused" : "";
             return (
-                '<div class="dp">' +
+                '<div class="dp' + paused + '">' +
                 DocProgress.headHtml(doc, state) +
+                RunControls.errorHtml(state) +
                 error +
                 body +
                 "</div>"
             );
         }
 
+        static allowed() {
+            return window.TEMPORAL_TASKS !== false;
+        }
+
         static watch(url, state, render, onEnd) {
+            if (!DocProgress.allowed()) {
+                state.error = DocProgress.DENIED;
+                render();
+                return null;
+            }
             const scheme = location.protocol === "https:" ? "wss://" : "ws://";
             const socket = new WebSocket(scheme + location.host + url);
             socket.onmessage = function (event) {
@@ -271,6 +240,7 @@
                     state.error = message.error;
                 } else {
                     state.progress = message;
+                    state.sending = "";
                 }
                 render();
             };
@@ -286,9 +256,9 @@
             return socket;
         }
 
-        static open(doc, url, cancelUrl) {
+        static open(doc, url) {
             const dark = DocActions.isDark();
-            const state = { progress: null, error: "", cancelUrl: cancelUrl, canceling: false };
+            const state = { progress: null, error: "" };
             let socket = null;
             let ticking = null;
 
@@ -309,9 +279,9 @@
                 color: dark ? "#d1d5db" : "#374151",
                 didOpen: function () {
                     document.getElementById("doc-progress-box").addEventListener("click", function (event) {
-                        const button = event.target.closest(".dp-cancel");
-                        if (button && !button.disabled) {
-                            DocProgress.cancel(state, render);
+                        const button = RunControls.target(event);
+                        if (button) {
+                            RunControls.send(state, button.dataset.runAction, render);
                         }
                     });
                     render();
@@ -333,13 +303,110 @@
                     return;
                 }
                 event.preventDefault();
-                DocProgress.open(button.dataset.doc, button.dataset.url, button.dataset.cancelUrl);
+                DocProgress.open(button.dataset.doc, button.dataset.url);
+            });
+        }
+    }
+
+    class RunControls {
+        static LABELS = { pause: "Pause", resume: "Resume", cancel: "Cancel" };
+        static BUSY = { pause: "Pausing\u2026", resume: "Resuming\u2026", cancel: "Canceling\u2026" };
+
+        static html(run, key) {
+            const progress = run && run.progress;
+            if (!progress || !progress.control_url || progress.status !== "Running") {
+                return "";
+            }
+            const actions = [progress.paused ? "resume" : "pause", "cancel"];
+            const buttons = actions.map(function (action) {
+                const label = run.sending === action ? RunControls.BUSY[action] : RunControls.LABELS[action];
+                return (
+                    '<button type="button" class="run-ctl-btn run-ctl-' + action + '" data-run-action="' + action + '"' +
+                    (key ? ' data-run-key="' + key + '"' : "") + (run.sending ? " disabled" : "") + ">" + label + "</button>"
+                );
+            });
+            return '<span class="run-ctl">' + buttons.join("") + "</span>";
+        }
+
+        static errorHtml(run) {
+            return run && run.controlError ? '<div class="dp-error">' + DocProgress.escape(run.controlError) + "</div>" : "";
+        }
+
+        static target(event) {
+            const button = event.target.closest("[data-run-action]");
+            return button && !button.disabled ? button : null;
+        }
+
+        static async send(run, action, render) {
+            run.sending = action;
+            run.controlError = "";
+            render();
+            const body = new FormData();
+            body.append("action", action);
+            try {
+                const response = await fetch(run.progress.control_url, {
+                    method: "POST",
+                    body: body,
+                    credentials: "same-origin",
+                    headers: { "X-CSRFToken": DocActions.csrfToken(), Accept: "application/json" },
+                });
+                const data = await response.json().catch(function () {
+                    return {};
+                });
+                if (!response.ok) {
+                    run.controlError = data.error || "Could not " + action + " (" + response.status + ").";
+                    run.sending = "";
+                }
+            } catch (error) {
+                run.controlError = error.message;
+                run.sending = "";
+            }
+            render();
+        }
+    }
+
+    class DocRowControls {
+        static SELECTOR = ".doc-ctl-btn";
+
+        static async send(button) {
+            const label = button.textContent;
+            button.disabled = true;
+            button.textContent = RunControls.BUSY[button.dataset.action];
+            const body = new FormData();
+            body.append("action", button.dataset.action);
+            const response = await fetch(button.dataset.url, {
+                method: "POST",
+                body: body,
+                credentials: "same-origin",
+                headers: { "X-CSRFToken": DocActions.csrfToken(), Accept: "application/json" },
+            }).catch(function () {
+                return null;
+            });
+            const data = response ? await response.json().catch(function () { return {}; }) : {};
+            if (response && response.ok) {
+                location.reload();
+                return;
+            }
+            button.disabled = false;
+            button.textContent = label;
+            Swal.fire({ icon: "error", text: data.error || "Could not " + button.dataset.action + "." });
+        }
+
+        static bind() {
+            document.addEventListener("click", function (event) {
+                const button = event.target.closest(DocRowControls.SELECTOR);
+                if (button && !button.disabled) {
+                    event.preventDefault();
+                    DocRowControls.send(button);
+                }
             });
         }
     }
 
     window.DocActions = DocActions;
     window.DocProgress = DocProgress;
+    window.RunControls = RunControls;
     DocActions.bind();
     DocProgress.bind();
+    DocRowControls.bind();
 })();

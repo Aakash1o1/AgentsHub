@@ -1,5 +1,5 @@
 import re
-from django.db.models import Q
+from typing import Literal
 from django.urls import reverse
 from django.utils import timezone
 from temporalio.exceptions import WorkflowAlreadyStartedError
@@ -7,11 +7,12 @@ from pgvector.django import L2Distance
 from scraper.services.client import OllamaClient
 from scraper.models import Chunk, Document
 from scraper.services.progress import DocumentProgress
-from base.services.temporal import RunningJobs
 from scraper.temporal_workflow.temporal import DocumentWorkflows
-from chat.models import Message
+from base.services.temporal import TemporalClient, WorkflowRun
+from chat.services.access import TaskAccess
 from chat.services.chat import ChatService
 from chat.services.files import ChatFileService
+from chat.services.jobs import ChatJobs
 from chat.temporal_workflow.temporal import ChatFileSummaries
 from analysis.services.datasets import DatasetService
 from ddgs import DDGS
@@ -200,6 +201,15 @@ class DatasetTools:
                 "and should be checked against it:\n" + points), chart
 
 
+class TaskGate:
+    REPLY = TaskAccess.DENIED + " Tell the user exactly this, and that an admin can give them the permission."
+
+    @staticmethod
+    def denied(config):
+        chat = config["configurable"].get("chat")
+        return not TaskAccess.allowed(chat.user if chat else None)
+
+
 class DocumentTools:
     MAX_ROWS = 50
 
@@ -228,7 +238,6 @@ class DocumentTools:
                 "last_run": last_run,
                 "run_id": doc.workflow_run_id,
                 "enqueue_url": reverse("enqueue_document", args=[doc.id]),
-                "cancel_url": reverse("cancel_document", args=[doc.id]),
                 "progress_url": DocumentProgress.socket_path(doc.id),
             })
         return {
@@ -244,16 +253,8 @@ class DocumentTools:
         chat = config["configurable"].get("chat")
         if chat is None:
             return Document.objects.none()
-        vendor = config["configurable"]["vendor"]
-        shown = DocumentTools.card_document_ids(chat)
-        return (Document.objects.filter(Q(chat_messages__chat=chat) | Q(id__in=shown), vendor=vendor, is_active=True)
+        return (Document.objects.filter(chat_messages__chat=chat, vendor=config["configurable"]["vendor"], is_active=True)
                 .distinct().order_by("-id"))
-
-    @staticmethod
-    def card_document_ids(chat):
-        messages = chat.messages.visible().filter(role="assistant", message__contains=Message.ARTIFACT_MARKER)
-        cards = [m.artifact for m in messages if m.artifact and m.artifact.get("kind") == "document_runs"]
-        return {row["id"] for card in cards for row in card.get("documents", []) if "id" in row}
 
     @staticmethod
     def vendor_documents(config):
@@ -261,104 +262,87 @@ class DocumentTools:
 
     @tool
     def list_chat_workflows(config: RunnableConfig) -> str:
-        """List the Temporal workflow IDs and current status of this chat's documents: chat files and links added to the knowledge base, and documents shown in a document card earlier in this chat. Includes completed ones. This is the default for any question about workflows or workflow IDs. Only when the user asks to see the pending or unfinished documents themselves, use list_unfinished_documents instead."""
+        """List the Temporal workflow IDs of this chat's files that were added to the knowledge base, with the status of their newest run read from Temporal. Use this only when the user asks for workflow IDs. For tasks, use show_tasks instead."""
+        if TaskGate.denied(config):
+            return TaskGate.REPLY
         docs = list(DocumentTools.chat_documents(config)[:DocumentTools.MAX_ROWS])
         if not docs:
-            return "This chat has no documents yet: no chat file was added to the knowledge base and no document card was shown, so there are no workflow IDs to list."
-        lines = [
-            f"- {DocumentWorkflows.workflow_id(doc)}: {doc.source_label} ({doc.status}{'' if doc.workflow_run_id else ', never run'})"
-            for doc in docs
-        ]
-        return "Workflow IDs of this chat's documents, newest first, with their current status:\n" + "\n".join(lines)
-
-    JOB_CLASSES = (DocumentWorkflows, ChatFileSummaries)
-
-    @staticmethod
-    def job_card(title, executions):
-        rows = []
-        for execution in executions:
-            job = RunningJobs.owner(execution, DocumentTools.JOB_CLASSES)
-            rows.append({
-                "workflow_id": execution.id,
-                "name": job.job_label(execution.id),
-                "readonly": True,
-                "status": "running",
-                "run_id": execution.run_id,
-                "started_at": execution.start_time.isoformat(),
-                "progress_url": job.job_socket_path(execution.id, execution.run_id),
-            })
-        return {
-            "kind": "document_runs",
-            "title": title,
-            "fetched_at": timezone.now().isoformat(),
-            "truncated": False,
-            "documents": rows,
-        }
-
-    @tool(response_format="content_and_artifact")
-    def list_running_jobs() -> tuple[str, dict]:
-        """Show the jobs running in Temporal right now, read from Temporal itself, with live progress: document processing jobs and chat file summary jobs. Use this when the user asks for pending tasks or jobs, or what is being processed at the moment. For documents that are not processed yet, use list_unfinished_documents instead."""
+            return "No file of this chat was added to the knowledge base, so there are no workflow IDs to list."
         try:
-            executions = RunningJobs.fetch(DocumentTools.JOB_CLASSES)
+            runs = ChatJobs.runs_of([DocumentWorkflows.workflow_id(doc) for doc in docs], config["configurable"]["vendor"].id)
         except Exception as error:
-            return f"Error: could not read the running jobs from Temporal: {error}", None
-        if not executions:
-            return "No jobs are running in Temporal right now.", None
-        jobs = ", ".join(
-            f"{execution.id} ({RunningJobs.owner(execution, DocumentTools.JOB_CLASSES).job_label(execution.id)})"
-            for execution in executions
-        )
-        content = (f"{len(executions)} jobs are running in Temporal right now: {jobs}. "
-                   "They are shown to the user as a list with live progress. "
-                   "Do not repeat the list; summarise it in one sentence.")
-        return content, DocumentTools.job_card("Running jobs", executions)
+            return f"Error: could not read the workflows from Temporal: {error}"
+        lines = []
+        for doc in docs:
+            workflow_id = DocumentWorkflows.workflow_id(doc)
+            run = runs.get(workflow_id)
+            lines.append(f"- {workflow_id}: {doc.source_label} ({run.status_name if run else 'never run'})")
+        return "Workflow IDs of this chat's files in the knowledge base, newest first, with their Temporal status:\n" + "\n".join(lines)
 
     @tool(response_format="content_and_artifact")
-    def list_unfinished_documents(config: RunnableConfig) -> tuple[str, dict]:
-        """Show the user all documents of the knowledge base that are not processed yet, not only this chat's: pending (never processed or canceled) or failed, each with a Start button. Use this ONLY when the user asks to see pending, unprocessed or failed documents. For jobs running right now, use list_running_jobs. For questions about workflow IDs, use list_chat_workflows instead."""
-        active = DocumentTools.vendor_documents(config)
-        docs = list(active.filter(status__in=Document.UNPROCESSED_STATUSES)[:DocumentTools.MAX_ROWS + 1])
-        if not docs:
-            return "There are no unprocessed documents: nothing is pending or failed.", None
-        truncated = len(docs) > DocumentTools.MAX_ROWS
-        docs = docs[:DocumentTools.MAX_ROWS]
-        pending = ", ".join(str(doc.id) for doc in docs if doc.status == "pending") or "none"
-        failed = ", ".join(str(doc.id) for doc in docs if doc.status == "error") or "none"
-        more = f" (only the newest {DocumentTools.MAX_ROWS} are listed)" if truncated else ""
-        content = (f"Found {len(docs)} unprocessed documents in the knowledge base{more}. Document IDs by state: "
-                   f"pending (never processed or canceled): {pending}; failed: {failed}. "
-                   "This is the current state: when you mention a document, use only these IDs, never IDs from earlier messages. "
-                   "They are shown to the user as a list, each with a Start button. "
-                   "Do not repeat the list; summarise it in one sentence.")
-        return content, DocumentTools.card("Unprocessed documents", docs, truncated)
+    def show_tasks(tab: Literal["running", "failed", "todo", "done"], config: RunnableConfig) -> tuple[str, dict]:
+        """Show the user's tasks from all their chats (file summaries and knowledge-base processing) in one card read from Temporal, with the tabs Running, Failed, To do and Done. Running, Failed and Done cover all chats; To do lists only this chat's files whose tasks never started. tab picks the tab that opens first:
+- "done" for recent, recently done, latest, finished or completed tasks, including "all recent tasks" or "what finished".
+- "running" only when the user asks what is running, paused or being processed right now.
+- "failed" for failed, cancelled or stopped tasks.
+- "todo" for pending, unfinished, left or not started tasks.
+Use this whenever the user asks about tasks or jobs."""
+        if TaskGate.denied(config):
+            return TaskGate.REPLY, None
+        chat = config["configurable"].get("chat")
+        if chat is None:
+            return "There is no chat, so there are no tasks to list.", None
+        try:
+            rows = ChatJobs.tasks(chat.user, chat)
+        except Exception as error:
+            return f"Error: could not read the tasks from Temporal: {error}", None
+        if not rows:
+            return "There are no tasks: nothing ran in your chats and this chat has no files to start.", None
+        content = ("The tasks are shown to the user as a card. Reply with exactly this sentence and nothing else: "
+                   "Here are the tasks.")
+        card = {"kind": "chat_tasks", "tab": tab if tab in ChatJobs.TABS else "running", "chat_id": chat.id,
+                "fetched_at": timezone.now().isoformat(), "tasks": rows}
+        return content, card
 
     @tool(response_format="content_and_artifact")
-    def start_document_processing(document_id: str, config: RunnableConfig) -> tuple[str, dict]:
-        """Start processing ONE document that the user has explicitly named by its document ID (like 68) or workflow ID (like document-68). Never call this for documents the user did not name, and never to process several or all documents at once; for that, show the pending list instead."""
+    def start_document_processing(document_ids: list[str], config: RunnableConfig) -> tuple[str, dict]:
+        """Start the knowledge-base job (chunking and embedding) of documents that are already in the knowledge base, named by the user by their document IDs (like 68) or workflow IDs (like document-68). Pass every ID the user names, at most 5 are started per request. Never call this for documents the user did not name, and never when the user asks to process a chat file: that is process_chat_file."""
         vendor = config["configurable"]["vendor"]
-        match = re.fullmatch(r"\s*#?(?:document-)?(\d+)\s*", document_id, re.IGNORECASE)
-        if match is None:
-            return f"'{document_id}' is not a document ID. Use a number like 68 or a workflow ID like document-68.", None
-        doc_id = int(match.group(1))
-        doc = Document.objects.filter(id=doc_id, vendor=vendor, is_active=True).first()
-        if doc is None:
-            return f"There is no document {doc_id} in this knowledge base.", None
-        if not doc.is_unprocessed:
-            return f"Document {doc_id} is {doc.status}; only pending or failed documents can be started.", None
-        try:
-            chat = config["configurable"].get("chat")
-            workflow_id = DocumentWorkflows.start(doc, user=chat.user if chat else None)
-        except WorkflowAlreadyStartedError:
-            return f"Document {doc_id} is already being processed.", None
-        except Exception as error:
-            return f"Error: could not start document {doc_id}: {error}", None
-        doc.refresh_from_db()
-        content = (f"Started processing document {doc_id} as Temporal workflow {workflow_id}. "
-                   "Its live progress is shown to the user.")
-        return content, DocumentTools.card("Processing started", [doc])
+        chat = config["configurable"].get("chat")
+        lines, started = [], []
+        for document_id in document_ids:
+            match = re.fullmatch(r"\s*#?(?:document-)?(\d+)\s*", str(document_id), re.IGNORECASE)
+            if match is None:
+                lines.append(f"- '{document_id}': not a document ID (use a number like 68 or document-68)")
+                continue
+            doc_id = int(match.group(1))
+            doc = Document.objects.filter(id=doc_id, vendor=vendor, is_active=True).first()
+            if doc is None:
+                lines.append(f"- document {doc_id}: not in this knowledge base")
+            elif not doc.is_unprocessed:
+                lines.append(f"- document {doc_id}: skipped, it is {doc.status}; only pending or failed documents can be started")
+            elif len(started) >= ChatFileTools.MAX_FILES:
+                lines.append(f"- document {doc_id}: not started, the limit is {ChatFileTools.MAX_FILES} per request")
+            else:
+                try:
+                    workflow_id = DocumentWorkflows.start(doc, user=chat.user if chat else None)
+                except WorkflowAlreadyStartedError:
+                    lines.append(f"- document {doc_id}: skipped, it is already being processed")
+                    continue
+                except Exception as error:
+                    lines.append(f"- document {doc_id}: could not start: {error}")
+                    continue
+                doc.refresh_from_db()
+                started.append(doc)
+                lines.append(f"- document {doc_id}: started as Temporal workflow {workflow_id}")
+        content = ChatFileTools.report("Knowledge-base jobs", lines, started)
+        return content, DocumentTools.card("Processing started", started) if started else None
 
 
 class ChatFileTools:
+    JOBS = {"summary": "summary", "knowledge_base": "knowledge-base"}
+    CONTROLS = {"pause": "Paused", "resume": "Resumed", "cancel": "Canceled"}
+    MAX_FILES = 5
     NO_FILES = ("No file or link has been added to this chat yet. "
                 "Ask the user to upload one with the Upload file button or add one with Add link.")
 
@@ -380,6 +364,43 @@ class ChatFileTools:
     @staticmethod
     def missing(file_id):
         return f"There is no file with id {file_id} in this chat. Call list_chat_files to see this chat's files."
+
+    @staticmethod
+    def pick(chat, file_ids, all_files):
+        files = ChatFileService.for_chat(chat)
+        if all_files:
+            return [message for message in files if not message.is_dataset], []
+        by_id = {message.id: message for message in files}
+        chosen, lines = [], []
+        for file_id in dict.fromkeys(file_ids or []):
+            message = by_id.get(file_id)
+            if message is None:
+                lines.append(f"- file id {file_id}: not in this chat")
+            elif message.is_dataset:
+                lines.append(f"- {message.file_label}: skipped, it is a table (use the dataset tools)")
+            else:
+                chosen.append(message)
+        return chosen, lines
+
+    @staticmethod
+    def report(title, lines, started):
+        if not lines:
+            return "No file was named and none fits. Ask the user which files they mean, or call list_chat_files."
+        body = f"{title}, one line per file:\n" + "\n".join(lines)
+        if started:
+            body += "\nA tasks card with live progress is shown to the user."
+        return body + "\nTell the user briefly which ones started and which were skipped and why. Do not summarise the files yourself."
+
+    @staticmethod
+    def tasks_card(chat, running_keys):
+        try:
+            rows = ChatJobs.tasks(chat.user)
+        except Exception:
+            return None
+        for row in rows:
+            if row["key"] in running_keys:
+                row.update(tab="running", reason="", finished_at=None, **running_keys[row["key"]])
+        return {"kind": "chat_tasks", "tab": "running", "fetched_at": timezone.now().isoformat(), "tasks": rows}
 
     @tool
     def list_chat_files(config: RunnableConfig) -> str:
@@ -409,63 +430,122 @@ class ChatFileTools:
         return f"Text of {message.file_label}:\n\n{text}"
 
     @tool(response_format="content_and_artifact")
-    def add_to_knowledge_base(file_id: int, config: RunnableConfig) -> tuple[str, dict]:
-        """Add a PDF, text file or link from this chat to the central knowledge base and start processing it in Temporal. Call this ONLY when the user explicitly asks to add a file to the knowledge base or central context. Never call it just because a file was uploaded or a question was asked about it."""
+    def add_to_knowledge_base(config: RunnableConfig, file_ids: list[int] | None = None, all_files: bool = False) -> tuple[str, dict]:
+        """Add PDFs, text files or links from this chat to the central knowledge base and start their knowledge-base job (chunking and embedding) in Temporal. Pass the file id of every file the user names in file_ids; each file is shown as [attached file: name, file id N]. Set all_files to true when the user asks to add all files. At most 5 files are added per request; files already in the knowledge base are skipped. Call this ONLY when the user explicitly asks to add files to the knowledge base or central context. Never call it just because a file was uploaded or a question was asked about it."""
         chat = ChatFileTools.chat(config)
-        message = ChatFileService.find(chat, file_id)
-        if message is None:
-            return ChatFileTools.missing(file_id), None
-        if message.is_dataset:
-            return f"{message.file_label} is a table. CSV and Excel files stay in the chat and cannot be added to the knowledge base.", None
-        try:
-            doc, created = ChatFileService.add_to_knowledge_base(message, config["configurable"]["vendor"], chat.user)
-        except Exception as error:
-            return f"Error: could not add {message.file_label} to the knowledge base: {error}", None
-        workflow_id = DocumentWorkflows.workflow_id(doc)
-        if not created:
-            content = (f"{message.file_label} is already in the knowledge base as document {doc.id} "
-                       f"(workflow {workflow_id}, status {doc.status}). Nothing new was added.")
-            return content, DocumentTools.card("Already in the knowledge base", [doc])
-        try:
-            ChatFileService.start_processing(doc, chat.user)
-        except Exception as error:
-            content = (f"Added {message.file_label} to the knowledge base as document {doc.id} ({workflow_id}), "
-                       f"but processing could not start: {error}. It can be started later.")
-            return content, DocumentTools.card("Added to the knowledge base", [doc])
-        content = (f"Added {message.file_label} to the knowledge base as document {doc.id} and started processing it "
-                   f"as Temporal workflow {workflow_id}. Its live progress is shown to the user.")
-        return content, DocumentTools.card("Added to the knowledge base", [doc])
-
+        chosen, lines = ChatFileTools.pick(chat, file_ids, all_files)
+        started = {}
+        for message in chosen:
+            if message.document_id:
+                doc = message.document
+                lines.append(f"- {message.file_label}: skipped, already in the knowledge base as document {doc.id} ({doc.status})")
+                continue
+            if len(started) >= ChatFileTools.MAX_FILES:
+                lines.append(f"- {message.file_label}: not added, the limit is {ChatFileTools.MAX_FILES} files per request")
+                continue
+            try:
+                doc, _ = ChatFileService.add_to_knowledge_base(message, config["configurable"]["vendor"], chat.user)
+            except Exception as error:
+                lines.append(f"- {message.file_label}: could not add it: {error}")
+                continue
+            try:
+                workflow_id = ChatFileService.start_processing(doc, chat.user)
+            except Exception as error:
+                lines.append(f"- {message.file_label}: added as document {doc.id}, but processing could not start: {error}")
+                continue
+            started[f"kb-{message.id}"] = {}
+            lines.append(f"- {message.file_label}: added as document {doc.id} and processing started ({workflow_id})")
+        content = ChatFileTools.report("Adding to the knowledge base", lines, started)
+        return content, ChatFileTools.tasks_card(chat, started) if started else None
 
     @tool(response_format="content_and_artifact")
-    def process_chat_file(file_id: int, config: RunnableConfig) -> tuple[str, dict]:
-        """Process a PDF, text file or link from this chat: a Temporal workflow summarises it piece by piece, saves the summary and posts it in the chat as a new message when it is done. Call this ONLY when the user asks to PROCESS a file they name. Pick the file by its name: each one is shown as [attached file: name, file id N]. If the user asks to summarise a file, use read_chat_file and summarise it yourself instead. If the user mentions the knowledge base or central context, use add_to_knowledge_base instead."""
+    def process_chat_file(config: RunnableConfig, file_ids: list[int] | None = None, all_files: bool = False) -> tuple[str, dict]:
+        """Process PDFs, text files or links from this chat: for each one a Temporal workflow summarises it piece by piece and posts the summary in the chat as a new message when it is done. Call this whenever the user asks to PROCESS files of this chat. Pass the file id of every file the user names in file_ids; each file is shown as [attached file: name, file id N]. Set all_files to true when the user asks to process all files. At most 5 files are started per request; files already processed or being processed are skipped. Processing never adds files to the knowledge base. If the user asks to summarise a file, use read_chat_file and summarise it yourself instead. If the user mentions the knowledge base or central context, use add_to_knowledge_base instead."""
         chat = ChatFileTools.chat(config)
-        message = ChatFileService.find(chat, file_id)
-        if message is None:
-            return ChatFileTools.missing(file_id), None
-        if message.is_dataset:
-            return f"{message.file_label} is a table. Use list_datasets and query_dataset for it.", None
-        workflow_id = ChatFileSummaries.workflow_id(message)
+        chosen, lines = ChatFileTools.pick(chat, file_ids, all_files)
         try:
-            run_id = ChatFileSummaries.start(message)
-        except WorkflowAlreadyStartedError:
-            return f"{message.file_label} is already being processed as Temporal workflow {workflow_id}.", None
+            runs = ChatJobs.runs_of([ChatFileSummaries.workflow_id(message) for message in chosen], chat.vendor_id)
         except Exception as error:
-            return f"Error: could not start processing {message.file_label}: {error}", None
-        content = (f"Started processing {message.file_label} as Temporal workflow {workflow_id}. "
-                   "A card shows its live progress and the summary will be posted in this chat when it is done. "
-                   "Tell the user this in one sentence; do not summarise the file yourself.")
-        card = {
-            "kind": "file_summary",
-            "title": f"Processing {message.file_label}",
-            "file_id": message.id,
-            "name": message.file_label,
-            "workflow_id": workflow_id,
-            "run_id": run_id,
-            "progress_url": ChatFileSummaries.socket_path(message, run_id),
-        }
-        return content, card
+            return f"Error: could not read the tasks from Temporal: {error}", None
+        started = {}
+        for message in chosen:
+            run = runs.get(ChatFileSummaries.workflow_id(message))
+            if run is not None and run.status in WorkflowRun.ACTIVE:
+                lines.append(f"- {message.file_label}: skipped, it is being processed already")
+                continue
+            if run is not None and run.status == WorkflowRun.COMPLETED:
+                lines.append(f"- {message.file_label}: skipped, it was processed already")
+                continue
+            if len(started) >= ChatFileTools.MAX_FILES:
+                lines.append(f"- {message.file_label}: not started, the limit is {ChatFileTools.MAX_FILES} files per request")
+                continue
+            try:
+                run_id = ChatFileSummaries.start(message)
+            except WorkflowAlreadyStartedError:
+                lines.append(f"- {message.file_label}: skipped, it is processed or being processed already")
+                continue
+            except Exception as error:
+                lines.append(f"- {message.file_label}: could not start: {error}")
+                continue
+            started[f"summary-{message.id}"] = {"progress_url": ChatFileSummaries.socket_path(message, run_id)}
+            lines.append(f"- {message.file_label}: started ({ChatFileSummaries.workflow_id(message)})")
+        content = ChatFileTools.report("Processing", lines, started)
+        return content, ChatFileTools.tasks_card(chat, started) if started else None
+
+
+class TaskControlTools:
+    @staticmethod
+    def workflow_id(message, job):
+        if job == "summary":
+            return ChatFileSummaries.workflow_id(message)
+        return DocumentWorkflows.workflow_id(message.document) if message.document_id else None
+
+    @tool(response_format="content_and_artifact")
+    def control_task(job: str, action: str, config: RunnableConfig, file_ids: list[int] | None = None,
+                     all_files: bool = False) -> tuple[str, dict]:
+        """Pause, resume or cancel running tasks of files in this chat, the same as the Pause, Resume and Cancel buttons. job is "summary" (the files' summary tasks) or "knowledge_base" (adding the files to the knowledge base). action is "pause", "resume" or "cancel". Pass the file id of every file the user names in file_ids, or set all_files to true when the user says all. Use this only when the user asks to pause, resume, continue, stop or cancel tasks. If you do not know the file ids, call list_chat_files first."""
+        if TaskGate.denied(config):
+            return TaskGate.REPLY, None
+        if job not in ChatFileTools.JOBS:
+            return 'Error: job must be "summary" or "knowledge_base".', None
+        if action not in ChatFileTools.CONTROLS:
+            return 'Error: action must be "pause", "resume" or "cancel".', None
+        chat = ChatFileTools.chat(config)
+        chosen, lines = ChatFileTools.pick(chat, file_ids, all_files)
+        targets = {message: TaskControlTools.workflow_id(message, job) for message in chosen}
+        try:
+            runs = ChatJobs.runs_of([workflow_id for workflow_id in targets.values() if workflow_id], chat.vendor_id)
+        except Exception as error:
+            return f"Error: could not read the tasks from Temporal: {error}", None
+        done = 0
+        for message, workflow_id in targets.items():
+            name = f"{ChatFileTools.JOBS[job]} task of {message.file_label}"
+            run = runs.get(workflow_id) if workflow_id else None
+            if all_files and (run is None or run.status not in WorkflowRun.ACTIVE):
+                continue
+            if workflow_id is None:
+                lines.append(f"- {message.file_label}: never added to the knowledge base, so it has no knowledge-base task")
+            elif run is None or run.status not in WorkflowRun.ACTIVE:
+                lines.append(f"- {name}: not running, nothing to {action}")
+            elif action == "resume" and run.status != WorkflowRun.PAUSED:
+                lines.append(f"- {name}: not paused, nothing to resume")
+            elif action == "pause" and run.status == WorkflowRun.PAUSED:
+                lines.append(f"- {name}: already paused")
+            else:
+                try:
+                    getattr(TemporalClient, action)(workflow_id, run.run_id, f"{ChatFileTools.CONTROLS[action]} from chat {chat.id}")
+                except Exception as error:
+                    lines.append(f"- {name}: could not {action}: {error}")
+                    continue
+                done += 1
+                lines.append(f"- {name}: {ChatFileTools.CONTROLS[action].lower()}")
+        if not lines and all_files:
+            return f"No {ChatFileTools.JOBS[job]} task of this chat is running, so there is nothing to {action}.", None
+        if not lines:
+            return "No file was named and none fits. Ask the user which files they mean, or call list_chat_files.", None
+        content = (f"Result, one line per file:\n" + "\n".join(lines) +
+                   "\nTell the user briefly what was done and what was skipped and why.")
+        return content, ChatFileTools.tasks_card(chat, {}) if done else None
 
 
 TOOL_REGISTRY = {
@@ -480,13 +560,13 @@ TOOL_REGISTRY = {
     "query_dataset": DatasetTools.query_dataset,
     "make_chart": DatasetTools.make_chart,
     "make_chart_from_values": DatasetTools.make_chart_from_values,
-    "list_unfinished_documents": DocumentTools.list_unfinished_documents,
-    "list_running_jobs": DocumentTools.list_running_jobs,
+    "show_tasks": DocumentTools.show_tasks,
     "start_document_processing": DocumentTools.start_document_processing,
     "list_chat_workflows": DocumentTools.list_chat_workflows,
     "list_chat_files": ChatFileTools.list_chat_files,
     "read_chat_file": ChatFileTools.read_chat_file,
     "add_to_knowledge_base": ChatFileTools.add_to_knowledge_base,
     "process_chat_file": ChatFileTools.process_chat_file,
+    "control_task": TaskControlTools.control_task,
 }
 

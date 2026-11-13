@@ -117,6 +117,13 @@
     margin-top: 2px;
 }
 
+.doc-row-ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
 .doc-progress-btn {
     background: #db2777;
     color: #ffffff;
@@ -132,21 +139,6 @@
 
 .doc-progress-btn:hover {
     background: #be185d;
-}
-
-.doc-run-btn {
-    display: block;
-    width: 100%;
-    margin: 6px 0;
-    padding: 10px 14px;
-    text-align: left;
-    font-size: 13px;
-    font-weight: 700;
-    border: 1px solid #db2777;
-    border-radius: 8px;
-    background: transparent;
-    color: #db2777;
-    cursor: pointer;
 }
 
 .dp {
@@ -202,25 +194,45 @@
     gap: 8px;
 }
 
-.dp-cancel {
+.run-ctl {
+    display: inline-flex;
+    gap: 6px;
+}
+
+.run-ctl-btn {
     padding: 3px 12px;
-    border: 1px solid var(--dp-red);
+    border: 1px solid currentColor;
     border-radius: 999px;
     background: transparent;
-    color: var(--dp-red);
     font-size: 11px;
     font-weight: 700;
     cursor: pointer;
 }
 
-.dp-cancel:hover:not(:disabled) {
-    background: var(--dp-red);
+.run-ctl-pause,
+.run-ctl-resume {
+    color: #d97706;
+}
+
+.run-ctl-cancel {
+    color: #dc2626;
+}
+
+.run-ctl-pause:hover:not(:disabled),
+.run-ctl-resume:hover:not(:disabled) {
+    background: #d97706;
+    border-color: #d97706;
     color: #ffffff;
 }
 
-.dp-cancel:disabled {
-    border-color: #9ca3af;
-    color: #9ca3af;
+.run-ctl-cancel:hover:not(:disabled) {
+    background: #dc2626;
+    border-color: #dc2626;
+    color: #ffffff;
+}
+
+.run-ctl-btn:disabled {
+    opacity: 0.55;
     cursor: default;
 }
 
@@ -238,6 +250,7 @@
 .dp-status-green { background: var(--dp-green); }
 .dp-status-red { background: var(--dp-red); }
 .dp-status-gray { background: #6b7280; }
+.dp-status-amber { background: var(--dp-amber); }
 
 .dp-overall {
     margin-bottom: 14px;
@@ -265,6 +278,7 @@
 
 .dp-bar-green > div { background: var(--dp-green); }
 .dp-bar-blue > div { background: var(--dp-blue); }
+.dp-paused .dp-bar > div { background: #9ca3af; }
 
 .dp-steps {
     list-style: none;
@@ -320,6 +334,14 @@
     background: radial-gradient(circle, var(--dp-blue) 0 4px, transparent 5px);
     animation: dp-pulse 1.4s ease-in-out infinite;
 }
+
+.dp-paused .dp-running .dp-dot {
+    border-color: #9ca3af;
+    background: radial-gradient(circle, #9ca3af 0 4px, transparent 5px);
+    animation: none;
+}
+
+.dp-paused .dp-running .dp-step-label { color: var(--dp-muted); }
 
 @keyframes dp-pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }

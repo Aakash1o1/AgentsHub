@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.urls import reverse
 from base.admin import VendorScopedAdmin, SoftDeleteAdminMixin
 from base.html import AdminHtml
 from .models import Agent
@@ -8,25 +9,31 @@ from .models import Agent
 @admin.register(Agent)
 class AgentAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
     vendor_lookup = "vendor"
-    list_display = ("label", "slug", "is_default", "prompt_name")
-    search_fields = ("label", "slug", "description", "prompt_name")
-    readonly_fields = ("label", "slug", "description", "is_default", "prompt_name", "tool_list")
+    list_display = ("label", "slug", "prompt_name", "tool_count", "builder_link")
+    search_fields = ("label", "slug", "description")
+    ordering = ("label",)
+    readonly_fields = ("label", "description", "prompt_name", "workflow")
 
     fieldsets = (
-        (None, {"fields": (("label", "slug"), "description")}),
-        ("Details", {
-            "fields": ("prompt_name", ("tool_list", "is_default")),
-            "classes": ("agent-details",),
-        }),
+        (None, {"fields": ("label", "description", "prompt_name", "workflow")}),
         VendorScopedAdmin.META_FIELDSET,
     )
-
-    class Media:
-        css = {"all": ("agent/agent_admin.css",)}
 
     def has_add_permission(self, request):
         return False
 
+    @admin.display(description="Prompt")
+    def prompt_name(self, obj):
+        return obj.workflow.prompt_name or "-"
+
     @admin.display(description="Tools")
-    def tool_list(self, obj):
-        return AdminHtml.chip_list(obj.tools)
+    def tool_count(self, obj):
+        return len(obj.workflow.tools)
+
+    @admin.display(description="Edit")
+    def builder_link(self, obj):
+        return AdminHtml.link_button(f"{reverse('agent_graph')}?agent={obj.id}", "Open in Agent Builder", icon="account_tree")
+
+    @admin.display(description="Workflow JSON")
+    def workflow(self, obj):
+        return AdminHtml.json_block(obj.workflow_json)

@@ -40,7 +40,7 @@
     }
 
     class RunRow {
-        static LABELS = { start: "Start", starting: "Starting…", cancel: "Cancel", canceling: "Canceling…" };
+        static LABELS = { start: "Start", starting: "Starting…" };
         static RESTARTABLE = ["Canceled", "Failed", "Terminated", "Timed out"];
         static SEGMENT_WEIGHTS = { embed_batch: 4, summarize_piece: 4 };
         static STEP_STATUS = { mark_extracting: "extracting", extract_text: "extracting", mark_embedding: "embedding", embed_batch: "embedding" };
@@ -48,7 +48,7 @@
 
         constructor(doc) {
             this.doc = doc;
-            this.state = doc.readonly ? "watch" : doc.startable ? "start" : doc.status === "completed" ? "done" : "cancel";
+            this.state = doc.readonly ? "watch" : doc.startable ? "start" : doc.status === "completed" ? "done" : "running";
             this.message = null;
             this.run = null;
             this.socket = null;
@@ -70,6 +70,7 @@
             }
             this.note = Html.element("div", "rl-note");
             this.live = Html.element("div", "dp rl-live");
+            this.live.addEventListener("click", this.control.bind(this));
             this.root = Html.element("li", "rl-row");
             this.root.append(top, this.meta, this.note, this.live);
         }
@@ -77,8 +78,13 @@
         click() {
             if (this.state === "start") {
                 this.start();
-            } else if (this.state === "cancel") {
-                this.cancel();
+            }
+        }
+
+        control(event) {
+            const button = RunControls.target(event);
+            if (button && this.run) {
+                RunControls.send(this.run, button.dataset.runAction, this.render.bind(this));
             }
         }
 
@@ -89,7 +95,7 @@
             const reply = await Html.post(this.doc.enqueue_url, { mode: "process_temporal" });
             this.message = { level: reply.data.level || "error", text: reply.data.message || "Could not start (" + reply.status + ")." };
             if (reply.ok && reply.data.level !== "error") {
-                this.state = "cancel";
+                this.state = "running";
                 this.watch();
             } else {
                 this.state = "start";
@@ -97,30 +103,12 @@
             this.render();
         }
 
-        async cancel() {
-            this.state = "canceling";
-            this.message = null;
-            this.render();
-            const reply = await Html.post(this.doc.cancel_url, {});
-            if (!reply.ok) {
-                this.state = "cancel";
-                this.message = { level: "error", text: reply.data.error || "Could not cancel (" + reply.status + ")." };
-            } else if (!this.socket) {
-                this.state = "start";
-                this.message = { level: "success", text: "Cancel requested." };
-            }
-            this.render();
-        }
-
         watch() {
             this.stopWatching();
-            this.run = { progress: null, error: "", cancelUrl: this.doc.cancel_url, canceling: false };
+            this.run = { progress: null, error: "" };
             const row = this;
             this.socket = DocProgress.watch(this.doc.progress_url, this.run, this.update.bind(this), function () {
                 row.socket = null;
-                if (row.state === "canceling") {
-                    row.state = "start";
-                }
                 row.render();
             });
         }
@@ -174,10 +162,12 @@
             });
             const step = running || failed;
             const current = step ? step.label + (step.progress ? " " + step.progress : "") : "";
-            const parts = ["Live: " + p.status, current, p.steps_done + "/" + p.steps_total + " steps"].filter(Boolean);
+            const parts = ["Live: " + DocProgress.statusLabel(p), current, p.steps_done + "/" + p.steps_total + " steps"].filter(Boolean);
             const error = step && step.last_error ? '<div class="dp-error">' + DocProgress.escape(step.last_error) + "</div>" : "";
             return (
-                '<div class="rl-live-line">' + DocProgress.escape(parts.join(" · ")) + "</div>" +
+                '<div class="rl-live-line rl-live-head"><span>' + DocProgress.escape(parts.join(" · ")) + "</span>" +
+                RunControls.html(this.run) + "</div>" +
+                RunControls.errorHtml(this.run) +
                 this.segmentsHtml(p.steps) +
                 error
             );
@@ -207,6 +197,9 @@
         }
 
         livePill(progress) {
+            if (progress.paused) {
+                return ["paused", "pending"];
+            }
             if (progress.status === "Running") {
                 const step = progress.steps.find(function (s) {
                     return s.state === "running";
@@ -226,14 +219,15 @@
             this.meta.textContent = doc.readonly
                 ? doc.workflow_id + " · started " + Html.when(doc.started_at) + run
                 : "#" + doc.id + " · " + doc.workflow_id + " · " + doc.source_type +
-                  " · last run: " + (progress ? progress.status : doc.last_run) + run;
-            this.button.hidden = this.state === "done" || this.state === "watch";
+                  " · last run: " + (progress ? DocProgress.statusLabel(progress) : doc.last_run) + run;
+            this.button.hidden = !(this.state in RunRow.LABELS);
             this.button.textContent = RunRow.LABELS[this.state] || "";
-            this.button.disabled = this.state === "starting" || this.state === "canceling";
-            this.button.className = "rl-btn rl-btn-" + (this.state.startsWith("cancel") ? "cancel" : "start");
+            this.button.disabled = this.state === "starting";
+            this.button.className = "rl-btn rl-btn-start";
             this.note.textContent = this.message ? this.message.text : "";
             this.note.className = "rl-note" + (this.message ? " rl-note-" + this.message.level : "");
             this.live.innerHTML = this.liveHtml();
+            this.live.classList.toggle("dp-paused", Boolean(progress && progress.paused));
         }
     }
 
@@ -260,7 +254,7 @@
             card.append(head, list, foot);
             bubble.appendChild(card);
             rows.forEach(function (row) {
-                if (row.state === "cancel" || row.state === "watch") {
+                if (row.state === "running" || row.state === "watch") {
                     row.watch();
                 }
             });

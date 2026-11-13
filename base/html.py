@@ -1,8 +1,19 @@
+import json
+
 from django.utils.html import format_html, format_html_join
 from django.urls import reverse
 
 
 class AdminHtml:
+    JSON_BOX_STYLE = (
+        "white-space:pre-wrap; margin:0; padding:12px 16px; border-radius:8px; font-size:12px; line-height:1.5; "
+        "background:rgba(124,58,237,0.06); border:1px solid rgba(124,58,237,0.25)"
+    )
+
+    @classmethod
+    def json_block(cls, data):
+        return format_html('<pre style="{}">{}</pre>', cls.JSON_BOX_STYLE, json.dumps(data, indent=2))
+
     @staticmethod
     def colored_badge(text, color):
         return format_html(

@@ -262,7 +262,7 @@ UNFOLD = {
                     {"title": "Agents", "icon": "smart_toy", "link": reverse_lazy("admin:agent_agent_changelist")},
                     {"title": "Temporal workflows", "icon": "schema",
                      "link": f"{TEMPORAL_UI_URL}/namespaces/{TEMPORAL_NAMESPACE}/workflows",
-                     "permission": lambda request: request.user.is_superuser},
+                     "permission": lambda request: request.user.has_perm("chat.view_temporal_tasks")},
                 ],
             },
             {
@@ -270,8 +270,10 @@ UNFOLD = {
                 "separator": True,
                 "collapsible": True,
                 "items": [
-                    {"title": "Vendors", "icon": "business", "link": reverse_lazy("admin:vendor_vendor_changelist")},
-                    {"title": "Users", "icon": "person", "link": reverse_lazy("admin:authentication_user_changelist")},
+                    {"title": "Vendors", "icon": "business", "link": reverse_lazy("admin:vendor_vendor_changelist"),
+                     "permission": lambda request: request.user.has_perm("vendor.view_vendor")},
+                    {"title": "Users", "icon": "person", "link": reverse_lazy("admin:authentication_user_changelist"),
+                     "permission": lambda request: request.user.has_perm("authentication.view_user")},
                 ],
             },
         ],

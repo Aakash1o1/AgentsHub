@@ -1,7 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import Permission
+from django.db.models import Q
 from unfold.admin import ModelAdmin
 
+from chat.services.access import TaskAccess
 from .models import User
 
 
@@ -11,15 +14,15 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
     list_select_related = ("active_vendor",)
     search_fields = ("username",)
     list_filter = ("is_superuser", "is_active")
-    filter_horizontal = ("vendors",)
-    readonly_fields = ("username", "email", "first_name", "last_name", "last_login", "date_joined", "keycloak_id")
+    filter_horizontal = ("vendors", "user_permissions")
+    readonly_fields = ("username", "first_name", "last_name")
+    EXTRA_PERMISSIONS = (TaskAccess.PERMISSION,)
 
     fieldsets = (
-        (None, {"fields": ("username",)}),
-        ("Profile (from Keycloak)", {"fields": ("email", ("first_name", "last_name"))}),
+        ("Profile", {"fields": ("username", ("first_name", "last_name"))}),
         ("Access", {"fields": (("is_active", "is_superuser"),)}),
-        ("Vendor access", {"fields": ("vendors", "active_vendor")}),
-        ("Meta", {"fields": (("last_login", "date_joined"), "keycloak_id"), "classes": ("collapse",)}),
+        ("Extra permissions", {"fields": ("user_permissions",)}),
+        ("Vendors", {"fields": ("vendors", "active_vendor")}),
     )
 
     def has_add_permission(self, request):
@@ -35,6 +38,15 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
     def get_form(self, request, obj=None, **kwargs):
         self.obj = obj
         return super().get_form(request, obj, **kwargs)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if db_field.name == "user_permissions":
+            query = Q()
+            for name in self.EXTRA_PERMISSIONS:
+                app, codename = name.split(".")
+                query |= Q(content_type__app_label=app, codename=codename)
+            kwargs["queryset"] = Permission.objects.filter(query)
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "active_vendor" and getattr(self, "obj", None):

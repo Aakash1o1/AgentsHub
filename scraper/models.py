@@ -48,6 +48,7 @@ class Document(BaseModel):
 
 
     UNPROCESSED_STATUSES = ("pending", "error")
+    RUNNING_STATUSES = ("queued", "scheduled", "processing", "extracting", "embedding")
 
     @property
     def source_label(self):
@@ -56,6 +57,10 @@ class Document(BaseModel):
     @property
     def is_unprocessed(self):
         return self.status in self.UNPROCESSED_STATUSES
+
+    @property
+    def is_running(self):
+        return self.status in self.RUNNING_STATUSES
 
     def __str__(self):
 

@@ -1,7 +1,7 @@
 import json
 
 from django.contrib import admin
-from django.db.models import Count
+from django.db.models import BooleanField, Case, Count, Value, When
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.text import Truncator
@@ -10,7 +10,9 @@ from base.html import AdminHtml
 from base.admin import VendorScopedAdmin, SoftDeleteAdminMixin
 from scraper.services.progress import DocumentProgress
 from scraper.services.queue import DocumentQueue
+from scraper.temporal_workflow.temporal import DocumentWorkflows
 from scraper.tasks import DocumentTasks
+from chat.services.access import TaskAccess
 
 
 
@@ -53,7 +55,22 @@ class DocumentAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
     )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).annotate(_chunk_count=Count("chunks"))
+        queryset = super().get_queryset(request).annotate(_chunk_count=Count("chunks"))
+        if request.resolver_match is None or request.resolver_match.url_name != "scraper_document_changelist":
+            return queryset
+        if not TaskAccess.allowed(request.user):
+            return queryset.annotate(_tasks=Value(False, output_field=BooleanField()))
+        return queryset.annotate(_tasks=Value(True, output_field=BooleanField()),
+                                 _paused=Case(When(id__in=self.paused_ids(queryset), then=Value(True)),
+                                              default=Value(False), output_field=BooleanField()))
+
+    @staticmethod
+    def paused_ids(queryset):
+        running = queryset.filter(status__in=Document.RUNNING_STATUSES).exclude(workflow_run_id="")
+        try:
+            return DocumentWorkflows.paused_doc_ids(running)
+        except Exception:
+            return set()
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         # THis fn determines what field widget is used for UI display
@@ -84,8 +101,6 @@ class DocumentAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
 
     @admin.display(description="Action")
     def action(self, obj):
-        progress_url = DocumentProgress.socket_path(obj.id) if obj.workflow_run_id else ""
-        cancel_url = reverse("cancel_document", args=[obj.id])
         if obj.is_unprocessed:
             return AdminHtml.js_action_button(
                 "Actions",
@@ -93,11 +108,16 @@ class DocumentAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
                 doc=obj.id,
                 url=reverse("enqueue_document", args=[obj.id]),
                 modes=json.dumps(self.ACTION_MODES),
-                progress_url=progress_url,
-                cancel_url=cancel_url,
             )
-        if progress_url:
-            return AdminHtml.js_action_button("Progress", "doc-progress-btn", doc=obj.id, url=progress_url, cancel_url=cancel_url)
+        if obj.is_running and obj.workflow_run_id and getattr(obj, "_tasks", False):
+            control_url = reverse("workflow_control", args=[DocumentWorkflows.workflow_id(obj), obj.workflow_run_id])
+            toggle = ("Resume", "resume") if getattr(obj, "_paused", False) else ("Pause", "pause")
+            return format_html(
+                '<span class="doc-row-ctl">{}{}{}</span>',
+                AdminHtml.js_action_button("Progress", "doc-progress-btn", doc=obj.id, url=DocumentProgress.socket_path(obj.id)),
+                AdminHtml.js_action_button(toggle[0], f"doc-ctl-btn run-ctl-btn run-ctl-{toggle[1]}", url=control_url, action=toggle[1]),
+                AdminHtml.js_action_button("Cancel", "doc-ctl-btn run-ctl-btn run-ctl-cancel", url=control_url, action="cancel"),
+            )
         return ""
 
     def enqueue_selected(self, request, queryset, mode):

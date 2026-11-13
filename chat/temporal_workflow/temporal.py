@@ -1,10 +1,13 @@
-from base.services.temporal import TemporalClient
+from temporalio.common import WorkflowIDReusePolicy
+
+from base.services.temporal import JobLabels, TemporalClient
 from chat.temporal_workflow.workflows import ChatFileSummaryWorkflow
 
 
 class ChatFileSummaries(TemporalClient):
     WORKFLOW_TYPE = ChatFileSummaryWorkflow.__name__
     WORKFLOW_PREFIX = "chat-file-summary-"
+    JOB_KIND = "Summary"
 
     @classmethod
     def workflow_id(cls, message):
@@ -28,4 +31,6 @@ class ChatFileSummaries(TemporalClient):
 
     @classmethod
     def start(cls, message):
-        return cls.send(ChatFileSummaryWorkflow.run, [message.id], cls.workflow_id(message))
+        return cls.send(ChatFileSummaryWorkflow.run, [message.id], cls.workflow_id(message),
+                        JobLabels.for_chat_file(message), JobLabels.memo(message),
+                        WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY)

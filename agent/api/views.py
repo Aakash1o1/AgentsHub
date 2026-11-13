@@ -11,6 +11,7 @@ from django.views import View
 from agent.models import Agent
 from agent.services.client import AgentClient
 from agent.services.tools import TOOL_REGISTRY
+from agent.services.workflow import AgentWorkflow
 
 
 class AgentPayload:
@@ -21,11 +22,9 @@ class AgentPayload:
             "slug": agent.slug,
             "label": agent.label,
             "description": agent.description,
-            "prompt_name": agent.prompt_name,
-            "tools": agent.tools,
             "is_default": agent.is_default,
             "is_active": agent.is_active,
-            "graph_json": agent.graph_json,
+            "workflow_json": agent.workflow_json,
         }
 
 
@@ -72,13 +71,10 @@ class AgentGraphSaveView(LoginRequiredMixin, View):
         if not label:
             return JsonResponse({"ok": False, "error": "Agent needs a name."}, status=400)
 
-        prompt_name = (data.get("prompt_name") or "").strip()
-        if not prompt_name:
-            return JsonResponse({"ok": False, "error": "Agent needs a prompt name."}, status=400)
-
-        tools = list(dict.fromkeys(
-            t for t in data.get("tools", []) if t in TOOL_REGISTRY
-        ))
+        workflow = AgentWorkflow(data.get("workflow_json"))
+        error = workflow.error(TOOL_REGISTRY)
+        if error:
+            return JsonResponse({"ok": False, "error": error}, status=400)
 
         agent_id = data.get("id")
 
@@ -94,10 +90,8 @@ class AgentGraphSaveView(LoginRequiredMixin, View):
             "label": label,
             "slug": slug,
             "description": data.get("description", ""),
-            "prompt_name": prompt_name,
-            "tools": tools,
             "is_default": bool(data.get("is_default", False)),
-            "graph_json": data.get("graph_json", {}),
+            "workflow_json": workflow.clean(),
             "updated_by": user,
         }
         if "is_active" in data:

@@ -3,7 +3,6 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import JsonResponse
 from django.shortcuts import redirect
-from temporalio.service import RPCError
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from scraper.models import Document
 from scraper.services.queue import DocumentQueue
@@ -58,15 +57,3 @@ class EnqueueDocumentView(LoginRequiredMixin, VisibleDocumentMixin, View):
         except Exception as exc:
             level, text = "error", f"Could not queue document {doc.id}: {exc}"
         return self.reply(request, level, text)
-
-
-class CancelDocumentView(LoginRequiredMixin, VisibleDocumentMixin, View):
-    def post(self, request, doc_id):
-        doc = self.visible_document(request.user, doc_id)
-        if doc is None or not doc.workflow_run_id:
-            return JsonResponse({"error": "No Temporal run for this document."}, status=404)
-        try:
-            DocumentWorkflows.stop(doc)
-        except RPCError as exc:
-            return JsonResponse({"error": f"Could not cancel: {exc}"}, status=409)
-        return JsonResponse({"ok": True})

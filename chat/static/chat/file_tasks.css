@@ -1,0 +1,351 @@
+.rc-msg.ft-wide {
+    width: 92%;
+    max-width: 92%;
+}
+
+.rl-card.ft-card {
+    width: 100%;
+}
+
+.ft-head {
+    padding: 10px 16px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.ft-head-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ft-reload {
+    display: inline-flex;
+    padding: 4px;
+    border: 1px solid var(--rc-border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--rc-muted);
+    cursor: pointer;
+}
+
+.ft-reload:hover {
+    color: var(--rc-heading);
+}
+
+.ft-reload:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.ft-reload .material-symbols-outlined {
+    font-size: 18px;
+}
+
+.ft-tabs {
+    display: inline-flex;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--rc-bubble-llm);
+    border: 1px solid var(--rc-border);
+}
+
+.ft-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--rc-muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ft-tab:hover {
+    color: var(--rc-heading);
+}
+
+.ft-tab.ft-tab-on {
+    background: var(--rc-primary);
+    color: var(--rc-primary-fg);
+}
+
+.ft-tab-count {
+    min-width: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: rgba(127, 127, 127, 0.25);
+    font-size: 11px;
+    text-align: center;
+}
+
+.ft-tab-on .ft-tab-count {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.ft-table {
+    display: flex;
+    flex-direction: column;
+    max-height: 480px;
+    overflow-y: auto;
+}
+
+.ft-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 130px 110px 210px;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 16px;
+    border-top: 1px solid var(--rc-border);
+}
+
+.ft-row[hidden] {
+    display: none;
+}
+
+.ft-row:not(.ft-header):hover {
+    background: rgba(127, 127, 127, 0.06);
+}
+
+.ft-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    background: var(--rc-surface);
+    color: var(--rc-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-top: none;
+}
+
+.ft-name {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    font-weight: 500;
+    color: var(--rc-heading);
+}
+
+.ft-icon {
+    flex-shrink: 0;
+    font-size: 20px;
+    color: var(--rc-muted);
+}
+
+.ft-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.ft-chat {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--rc-muted);
+    text-decoration: none;
+}
+
+.ft-chat:hover {
+    color: var(--rc-heading);
+    text-decoration: underline;
+}
+
+.ft-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ft-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.ft-actions .rl-btn {
+    min-width: 0;
+}
+
+.ft-actions .rl-btn[hidden] {
+    display: none;
+}
+
+.ft-empty {
+    padding: 24px 16px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--rc-muted);
+    border-top: 1px solid var(--rc-border);
+}
+
+.ft-empty[hidden] {
+    display: none;
+}
+
+.ft-header > div:last-child {
+    text-align: center;
+}
+
+.ft-actions {
+    justify-content: center;
+}
+
+.ft-actions .rl-btn:disabled {
+    background: #6b7280;
+    color: #e5e7eb;
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.ft-progress {
+    grid-column: 1 / -1;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ft-show-progress .ft-progress:not(:empty) {
+    display: flex;
+}
+
+.ft-progress-item .rl-live-line {
+    margin-bottom: 4px;
+}
+
+.ft-info {
+    display: flex;
+    justify-content: center;
+    min-width: 0;
+}
+
+.ft-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ft-status::before {
+    content: "";
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.ft-status-todo,
+.ft-status-starting {
+    color: var(--rc-muted);
+    background: rgba(127, 127, 127, 0.12);
+    border-color: rgba(127, 127, 127, 0.3);
+}
+
+.ft-status-running {
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.35);
+}
+
+.ft-status-paused {
+    color: #d97706;
+    background: rgba(217, 119, 6, 0.12);
+    border-color: rgba(217, 119, 6, 0.35);
+}
+
+.ft-status-failed {
+    color: #dc2626;
+    background: rgba(220, 38, 38, 0.12);
+    border-color: rgba(220, 38, 38, 0.35);
+}
+
+.ft-status-done {
+    color: #16a34a;
+    background: rgba(22, 163, 74, 0.12);
+    border-color: rgba(22, 163, 74, 0.35);
+}
+
+.dark .ft-status-running {
+    color: #93c5fd;
+}
+
+.dark .ft-status-paused {
+    color: #fcd34d;
+}
+
+.dark .ft-status-failed {
+    color: #fca5a5;
+}
+
+.dark .ft-status-done {
+    color: #86efac;
+}
+
+.ft-when {
+    text-align: center;
+    font-size: 12px;
+    color: var(--rc-muted);
+    white-space: nowrap;
+}
+
+.ft-badge {
+    flex-shrink: 0;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.ft-badge[hidden] {
+    display: none;
+}
+
+.ft-badge-summary {
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.12);
+    border-color: rgba(124, 58, 237, 0.35);
+}
+
+.ft-badge-kb {
+    color: #0f766e;
+    background: rgba(13, 148, 136, 0.12);
+    border-color: rgba(13, 148, 136, 0.35);
+}
+
+.dark .ft-badge-summary {
+    color: #c4b5fd;
+}
+
+.dark .ft-badge-kb {
+    color: #5eead4;
+}
+
+.ft-header > div:nth-child(2),
+.ft-header > div:nth-child(3) {
+    text-align: center;
+}
+

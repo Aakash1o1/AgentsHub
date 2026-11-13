@@ -39,7 +39,7 @@ class Command(BaseCommand):
                     workflows=[DocumentWorkflow, ChatFileSummaryWorkflow],# Workflow name(class we named as workflow)
                     activities=[acts.mark_stage, acts.extract_text, acts.embed_batch, acts.finish, acts.announce,
                                 summary.read_text, summary.summarize_piece, summary.combine,
-                                summary.save_summary, summary.post_summary], # Activity names it can handle
+                                summary.post_summary], # Activity names it can handle
                     activity_executor=executor,#
                 )
                 self.stdout.write(f"Worker polling task queue '{DocumentWorkflows.TASK_QUEUE}'. Ctrl-C to stop.")

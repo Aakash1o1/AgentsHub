@@ -5,6 +5,8 @@ from django.db.models import Q
 from django.urls import reverse
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
+from authentication.services.members import MemberAccess
+
 
 class KeycloakBackend(OIDCAuthenticationBackend):
     PROFILE_CLAIMS = {"email": "email", "given_name": "first_name", "family_name": "last_name"}
@@ -23,6 +25,7 @@ class KeycloakBackend(OIDCAuthenticationBackend):
             setattr(user, field, claims.get(claim) or "")
         user.set_unusable_password()
         user.save()
+        MemberAccess.join(user)
         return user
 
     def update_user(self, user, claims):

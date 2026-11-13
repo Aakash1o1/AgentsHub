@@ -4,9 +4,18 @@ from django.core.validators import URLValidator
 from django.http import JsonResponse
 from chat.models import Chat, Message
 from scraper.models import Document
+from chat.services.access import TaskAccess
 from chat.services.chat import ChatService
 from chat.services.files import ChatFileService
+from chat.services.jobs import ChatJobs
 from chat.services.notifier import ChatNotifier
+from chat.temporal_workflow.temporal import ChatFileSummaries
+from base.services.temporal import PauseRefused, TemporalClient
+from scraper.api.views import VisibleDocumentMixin
+from scraper.services.progress import DocumentProgress
+from scraper.temporal_workflow.temporal import DocumentWorkflows
+from temporalio.exceptions import WorkflowAlreadyStartedError
+from temporalio.service import RPCError
 from django.contrib import admin
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views import View
@@ -32,6 +41,7 @@ class ChatHomeView(LoginRequiredMixin, View):
             "chats": chats,
             "open_chat": open_chat,
             "chat_messages": open_chat.messages.visible() if open_chat else [],
+            "can_see_tasks": TaskAccess.allowed(user),
         })
         return render(request, "chat_admin.html", context)
 
@@ -105,3 +115,87 @@ class AddChatLinkView(LoginRequiredMixin, View):
         if renamed:
             ChatNotifier.notify_chat(chat.id, {"event": "renamed", "chat_id": chat.id, "title": chat.title})
         return JsonResponse({"level": "success", "id": link.id, "message": self.REPLY})
+
+
+class ChatFileActionView(LoginRequiredMixin, View):
+    @staticmethod
+    def reply(level, text, status=200, **extra):
+        return JsonResponse({"level": level, "message": text, **extra}, status=status)
+
+    @staticmethod
+    def visible_file(user, message_id):
+        if not user.active_vendor:
+            return None
+        message = Message.objects.visible().filter(id=message_id, chat__in=Chat.objects.visible_to(user)).first()
+        if message is None or not message.has_source or message.is_dataset:
+            return None
+        return message
+
+    def post(self, request, message_id):
+        message = self.visible_file(request.user, message_id)
+        if message is None:
+            return self.reply("error", "File not found in your chats.", status=404)
+        try:
+            return self.act(request, message)
+        except Exception as error:
+            return self.reply("error", f"Could not start: {error}", status=400)
+
+
+class StartFileSummaryView(ChatFileActionView):
+    def act(self, request, message):
+        try:
+            run_id = ChatFileSummaries.start(message)
+        except WorkflowAlreadyStartedError:
+            return self.reply("warning", f"{message.file_label} is already summarised or being summarised.")
+        return self.reply("success", f"Summary of {message.file_label} started.",
+                          progress_url=ChatFileSummaries.socket_path(message, run_id))
+
+
+class AddFileToKnowledgeView(ChatFileActionView):
+    def act(self, request, message):
+        doc, created = ChatFileService.add_to_knowledge_base(message, message.chat.vendor, request.user)
+        if not created:
+            return self.reply("warning", f"{message.file_label} is already in the knowledge base as document {doc.id}.")
+        ChatFileService.start_processing(doc, request.user)
+        return self.reply("success", f"{message.file_label} added to the knowledge base as document {doc.id}.",
+                          progress_url=DocumentProgress.socket_path(doc.id))
+
+
+class ChatTasksView(LoginRequiredMixin, View):
+    def get(self, request):
+        if not TaskAccess.allowed(request.user):
+            return JsonResponse({"error": TaskAccess.DENIED}, status=403)
+        if not request.user.active_vendor:
+            return JsonResponse({"error": "Pick a vendor first."}, status=404)
+        try:
+            chat = Chat.objects.visible_to(request.user).filter(id=request.GET.get("chat") or None).first()
+            return JsonResponse({"tasks": ChatJobs.tasks(request.user, chat)})
+        except Exception as error:
+            return JsonResponse({"error": f"Could not read the tasks from Temporal: {error}"}, status=502)
+
+
+class WorkflowControlView(LoginRequiredMixin, VisibleDocumentMixin, View):
+    ACTIONS = {"pause": TemporalClient.pause, "resume": TemporalClient.resume, "cancel": TemporalClient.cancel}
+    REASONS = {"pause": "Paused", "resume": "Resumed", "cancel": "Canceled"}
+
+    def visible(self, user, workflow_id):
+        if workflow_id.startswith(DocumentWorkflows.WORKFLOW_PREFIX):
+            return self.visible_document(user, DocumentWorkflows.doc_id(workflow_id)) is not None
+        return ChatFileActionView.visible_file(user, ChatFileSummaries.message_id(workflow_id)) is not None
+
+    def post(self, request, workflow_id, run_id):
+        name = request.POST.get("action")
+        action = self.ACTIONS.get(name)
+        if not TaskAccess.allowed(request.user):
+            return JsonResponse({"error": TaskAccess.DENIED}, status=403)
+        if action is None:
+            return JsonResponse({"error": "Unknown action."}, status=400)
+        if not self.visible(request.user, workflow_id):
+            return JsonResponse({"error": "Workflow not found."}, status=404)
+        try:
+            action(workflow_id, run_id, f"{self.REASONS[name]} by {request.user.get_username()} in the app")
+        except PauseRefused as error:
+            return JsonResponse({"error": f"Could not pause: {error}"}, status=409)
+        except RPCError as error:
+            return JsonResponse({"error": f"Temporal refused: {error}"}, status=409)
+        return JsonResponse({"ok": True})

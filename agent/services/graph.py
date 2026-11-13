@@ -7,6 +7,14 @@ from chat.services.files import ChatFileService
 
 
 
+class ToolChoice:
+    def __init__(self, llm, tools):
+        self.free = llm.bind_tools(tools)
+        self.forced = llm.bind_tools(tools, tool_choice="required")
+
+    def __call__(self, state, runtime):
+        return self.forced if isinstance(state["messages"][-1], HumanMessage) else self.free
+
 
 class AgentRunner:
     def __init__(self):
@@ -14,9 +22,13 @@ class AgentRunner:
 
 
     def get_agent_graph(self, agent):
-        compiled, config = self.client.get_prompt(agent.prompt_name)
-        tools = [TOOL_REGISTRY[name] for name in agent.tools if name in TOOL_REGISTRY]
-        return create_react_agent(self.client.get_llm(config), tools=tools, prompt=compiled)
+        workflow = agent.workflow
+        compiled, config = self.client.get_prompt(workflow.prompt_name)
+        tools = [TOOL_REGISTRY[name] for name in workflow.tools if name in TOOL_REGISTRY]
+        llm = self.client.get_llm(config)
+        if workflow.force_tool_call and tools:
+            llm = ToolChoice(llm, tools)
+        return create_react_agent(llm, tools=tools, prompt=compiled)
 
     ROUTER_FILE_LIMIT = 10
 

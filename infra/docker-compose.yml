@@ -91,7 +91,7 @@ services:
         until temporal operator cluster health; do sleep 2; done
         temporal operator namespace describe -n default || temporal operator namespace create -n default --retention 7d
         until temporal operator search-attribute list -n default > /dev/null; do sleep 2; done
-        for attr in CurrentActivity:Keyword Batches:Keyword ActivitiesDone:Int ActivitiesLeft:Int; do
+        for attr in CurrentActivity:Keyword Batches:Keyword ActivitiesDone:Int ActivitiesLeft:Int ChatId:Keyword VendorId:Keyword; do
           temporal operator search-attribute create -n default --name $${attr%%:*} --type $${attr##*:} || true
         done
         temporal operator search-attribute list -n default

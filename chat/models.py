@@ -46,6 +46,9 @@ class Chat(BaseModel):
 
     objects = models.Manager.from_queryset(ChatQuerySet)()
 
+    class Meta:
+        permissions = [("view_temporal_tasks", "Can see Temporal tasks")]
+
     def __str__(self):
         return self.title
 
@@ -76,7 +79,6 @@ class Message(BaseModel):
     url = models.URLField(blank=True)
     source_type = models.CharField(choices=Document.SOURCE_CHOICES, max_length=20, blank=True)
     document = models.ForeignKey(Document, on_delete=models.SET_NULL, null=True, blank=True, related_name="chat_messages")
-    summary = models.TextField(blank=True, default="")
 
     objects = models.Manager.from_queryset(MessageQuerySet)()
 

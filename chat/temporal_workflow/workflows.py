@@ -32,6 +32,5 @@ class ChatFileSummaryWorkflow:
             ))
 
         summary = await self.step(acts.combine, [message_id, notes, plan["paragraphs"]], self.WORK_STEP)
-        await self.step(acts.save_summary, [message_id, summary], self.DB_STEP)
         await self.step(acts.post_summary, [message_id, summary], self.DB_STEP)
         return summary

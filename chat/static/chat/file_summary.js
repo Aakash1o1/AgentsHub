@@ -29,12 +29,20 @@
             const meta = SummaryCard.element("div", "rl-meta", artifact.workflow_id + " · run " + artifact.run_id.slice(0, 8) + "…");
             meta.title = "Run ID " + artifact.run_id;
             this.live = SummaryCard.element("div", "dp rl-live");
+            this.live.addEventListener("click", this.control.bind(this));
             this.note = SummaryCard.element("div", "rl-note");
             row.append(meta, this.live, this.note);
             card.append(head, row);
             bubble.appendChild(card);
             this.render();
             DocProgress.watch(artifact.progress_url, this.run, this.render.bind(this));
+        }
+
+        control(event) {
+            const button = RunControls.target(event);
+            if (button) {
+                RunControls.send(this.run, button.dataset.runAction, this.render.bind(this));
+            }
         }
 
         segmentsHtml(steps) {
@@ -67,17 +75,20 @@
                 return s.state === "running" || s.state === "failed" || s.state === "stopped";
             });
             const current = step ? step.label + (step.progress ? " " + step.progress : "") : "";
-            const parts = ["Live: " + p.status, current, p.steps_done + "/" + p.steps_total + " steps"].filter(Boolean);
+            const parts = ["Live: " + DocProgress.statusLabel(p), current, p.steps_done + "/" + p.steps_total + " steps"].filter(Boolean);
             const error = step && step.last_error ? '<div class="dp-error">' + DocProgress.escape(step.last_error) + "</div>" : "";
-            return '<div class="rl-live-line">' + DocProgress.escape(parts.join(" · ")) + "</div>" + this.segmentsHtml(p.steps) + error;
+            return '<div class="rl-live-line rl-live-head"><span>' + DocProgress.escape(parts.join(" · ")) + "</span>" +
+                RunControls.html(this.run) + "</div>" + RunControls.errorHtml(this.run) + this.segmentsHtml(p.steps) + error;
         }
 
         render() {
             const p = this.run.progress;
             const status = p ? p.status : "Running";
-            this.pill.textContent = status.toLowerCase();
-            this.pill.className = "rl-pill rl-pill-" + (SummaryCard.PILLS[status] || "error");
+            const paused = Boolean(p && p.paused);
+            this.pill.textContent = paused ? "paused" : status.toLowerCase();
+            this.pill.className = "rl-pill rl-pill-" + (paused ? "pending" : SummaryCard.PILLS[status] || "error");
             this.live.innerHTML = this.liveHtml();
+            this.live.classList.toggle("dp-paused", paused);
             const done = status === "Completed";
             this.note.textContent = done ? "Done: the summary is posted in the chat." : "";
             this.note.className = "rl-note" + (done ? " rl-note-success" : "");

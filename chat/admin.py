@@ -1,7 +1,4 @@
-import json
-
 from django.contrib import admin
-from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.text import Truncator
 from .models import Chat, Message
@@ -39,6 +36,12 @@ class MessageInline(TabularInline):
 
 
 
+class OwnChatsAdmin:
+    @staticmethod
+    def own(queryset, user, lookup):
+        return queryset if user.is_superuser else queryset.filter(**{lookup: user})
+
+
 # Register your models here.
 @admin.register(Chat)
 class ChatAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
@@ -50,11 +53,21 @@ class ChatAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
 
     readonly_fields = ("session_key",)
     readonly_on_change = VendorScopedAdmin.readonly_on_change + ("summary",)
+    OWNER_FIELDS = ("user", "vendor")
 
     fieldsets = (
         (None, {"fields": (("user", "vendor"), ("title", "summary"), "session_key")}),
         VendorScopedAdmin.META_FIELDSET,
     )
+
+    def get_queryset(self, request):
+        return OwnChatsAdmin.own(super().get_queryset(request), request.user, "user")
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = super().get_readonly_fields(request, obj)
+        if request.user.is_superuser:
+            return readonly
+        return readonly + tuple(f for f in self.OWNER_FIELDS if f not in readonly)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         # THis fn determines what field widget is used for UI display
@@ -76,11 +89,11 @@ class MessageAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
     ordering = ("-id",)
     list_filter = (ActiveListFilter, ("attachment", admin.EmptyFieldListFilter))
     search_fields = ("message",)
-    readonly_fields = ("types", "attachment_link", "artifact_json")
+    readonly_fields = ("types", "attachment_link")
 
     fieldsets = (
         (None, {"fields": ("user", ("chat", "chat_session_key"), ("role", "agent"),
-                           "message", ("types", "attachment_link"), "artifact_json")}),
+                           "message", ("types", "attachment_link"))}),
         VendorScopedAdmin.META_FIELDSET,
     )
 
@@ -94,6 +107,9 @@ class MessageAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
     def has_add_permission(self, request):
         return False
 
+    def get_queryset(self, request):
+        return OwnChatsAdmin.own(super().get_queryset(request), request.user, "chat__user")
+
     @admin.display(description="Types")
     def types(self, obj):
         return ", ".join(obj.message_types) or "-"
@@ -104,11 +120,6 @@ class MessageAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
             return "-"
         return AdminHtml.link_button(obj.attachment.url, obj.file_label, icon="download", download=True)
 
-    @admin.display(description="Artifact")
-    def artifact_json(self, obj):
-        if not obj.artifact:
-            return "-"
-        return format_html("<pre style='white-space:pre-wrap'>{}</pre>", json.dumps(obj.artifact, indent=2))
 
     @admin.display(description="Message", ordering="message")
     def short_message(self, obj):
