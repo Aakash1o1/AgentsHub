@@ -23,11 +23,11 @@ class ChatJobs:
         return runs
 
     @classmethod
-    def runs_of(cls, workflow_ids, vendor_id):
+    def runs_of(cls, workflow_ids, vendor_id, user_id):
         executions = []
         for start in range(0, len(workflow_ids), cls.IDS_PER_QUERY):
             ids = ", ".join(f"'{workflow_id}'" for workflow_id in workflow_ids[start:start + cls.IDS_PER_QUERY])
-            executions += TemporalClient.list(f"WorkflowId IN ({ids}) AND {JobLabels.vendor_query(vendor_id)}")
+            executions += TemporalClient.list(f"WorkflowId IN ({ids}) AND {JobLabels.vendor_query(vendor_id)} AND {JobLabels.user_query(user_id)}")
         return cls.newest(executions)
 
     @classmethod
@@ -37,7 +37,7 @@ class ChatJobs:
         files = [message for message in ChatFileService.for_chats(Chat.objects.visible_to(user)) if not message.is_dataset]
         workflow_ids = [ChatFileSummaries.workflow_id(message) for message in files]
         workflow_ids += [DocumentWorkflows.workflow_id(message.document) for message in files if message.document_id]
-        runs = cls.runs_of(workflow_ids, user.active_vendor.id)
+        runs = cls.runs_of(workflow_ids, user.active_vendor.id, user.id)
         rows = []
         for message in files:
             rows.append(cls.summary_task(message, runs.get(ChatFileSummaries.workflow_id(message))))

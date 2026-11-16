@@ -1,6 +1,11 @@
 import json
+import tempfile
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+import requests
 from django.db import models, transaction
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -18,6 +23,30 @@ class ChatFile:
     @staticmethod
     def upload_to(instance, filename):
         return f"{ChatFile.FOLDER}/{generate_ulid()}/{default_storage.get_valid_name(filename)}"
+
+    @staticmethod
+    def url_for(path):
+        return settings.SITE_URL + default_storage.url(path)
+
+    @staticmethod
+    def name_from(url):
+        return unquote(Path(urlparse(url).path).name)
+
+    @staticmethod
+    @contextmanager
+    def temp_copy(name, data):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / name
+            path.write_bytes(data)
+            yield str(path)
+
+    @staticmethod
+    @contextmanager
+    def download(url, timeout=60):
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        with ChatFile.temp_copy(ChatFile.name_from(url), response.content) as path:
+            yield path
 
 
 # Single source of truth for "which chats a user may see"
@@ -72,12 +101,12 @@ class Message(BaseModel):
 
     role = models.CharField(choices=ROLE_TYPE,max_length=20)
     message = models.TextField()
-    attachment = models.FileField(upload_to=ChatFile.upload_to, blank=True, max_length=255)
+    attachment = models.URLField(blank=True, max_length=500)
     chat = models.ForeignKey(Chat,on_delete=models.SET_NULL,null=True,blank=True,related_name="messages")
     chat_session_key = models.CharField(max_length=26, blank=True, default="")
     agent = models.ForeignKey("agent.Agent",on_delete=models.SET_NULL,null=True,blank=True,related_name="messages",)
-    url = models.URLField(blank=True)
     source_type = models.CharField(choices=Document.SOURCE_CHOICES, max_length=20, blank=True)
+    url = models.URLField(blank=True)
     document = models.ForeignKey(Document, on_delete=models.SET_NULL, null=True, blank=True, related_name="chat_messages")
 
     objects = models.Manager.from_queryset(MessageQuerySet)()
@@ -136,7 +165,7 @@ class Message(BaseModel):
 
     @property
     def extension(self):
-        return Path(self.attachment.name).suffix.lower() if self.attachment else ""
+        return Path(ChatFile.name_from(self.attachment)).suffix.lower() if self.attachment else ""
 
     @property
     def is_dataset(self):
@@ -151,12 +180,12 @@ class Message(BaseModel):
     @property
     def file_label(self):
         if self.attachment:
-            return Path(self.attachment.name).name
+            return ChatFile.name_from(self.attachment)
         return self.url
 
     @property
     def table_name(self):
-        table = slugify(Path(self.attachment.name).stem).replace("-", "_") or "table"
+        table = slugify(Path(ChatFile.name_from(self.attachment)).stem).replace("-", "_") or "table"
         if table[0].isdigit():
             table = f"t_{table}"
         return f"{table}_{self.id}"

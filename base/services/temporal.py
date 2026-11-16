@@ -194,14 +194,18 @@ class WorkflowRun:
 class JobLabels:
     CHAT = SearchAttributeKey.for_keyword("ChatId")
     VENDOR = SearchAttributeKey.for_keyword("VendorId")
+    USER = SearchAttributeKey.for_keyword("UserId")
 
     @classmethod
-    def build(cls, chat=None, vendor_id=None):
+    def build(cls, chat=None, vendor_id=None, user_id=None):
         pairs = []
         if chat is not None:
             pairs.append(SearchAttributePair(cls.CHAT, str(chat.id)))
+            user_id = chat.user_id
         if vendor_id is not None:
             pairs.append(SearchAttributePair(cls.VENDOR, str(vendor_id)))
+        if user_id is not None:
+            pairs.append(SearchAttributePair(cls.USER, str(user_id)))
         return TypedSearchAttributes(pairs)
 
     @classmethod
@@ -216,6 +220,10 @@ class JobLabels:
     def vendor_query(vendor_id):
         return f"VendorId = '{vendor_id}'"
 
+    @staticmethod
+    def user_query(user_id):
+        return f"(UserId = '{user_id}' OR UserId IS NULL)"
+
     @classmethod
     def chat_query(cls, chat):
-        return f"ChatId = '{chat.id}' AND {cls.vendor_query(chat.vendor_id)}"
+        return f"ChatId = '{chat.id}' AND {cls.vendor_query(chat.vendor_id)} AND {cls.user_query(chat.user_id)}"

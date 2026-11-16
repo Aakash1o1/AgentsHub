@@ -53,5 +53,5 @@ class DocumentWorkflows(TemporalClient):
     def labels(doc):
         message = doc.chat_messages.filter(chat__isnull=False).select_related("chat").order_by("id").first()
         if message is None:
-            return JobLabels.build(vendor_id=doc.vendor_id), {"file": doc.source_label}
+            return JobLabels.build(vendor_id=doc.vendor_id, user_id=doc.created_by_id), {"file": doc.source_label}
         return JobLabels.build(chat=message.chat, vendor_id=doc.vendor_id), JobLabels.memo(message)

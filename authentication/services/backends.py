@@ -5,6 +5,7 @@ from django.db.models import Q
 from django.urls import reverse
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
+from authentication.services.keycloak_users import TemporalAdmins
 from authentication.services.members import MemberAccess
 
 
@@ -26,6 +27,7 @@ class KeycloakBackend(OIDCAuthenticationBackend):
         user.set_unusable_password()
         user.save()
         MemberAccess.join(user)
+        TemporalAdmins.sync(user)
         return user
 
     def update_user(self, user, claims):
@@ -39,6 +41,7 @@ class KeycloakBackend(OIDCAuthenticationBackend):
             changed.append("keycloak_id")
         if changed:
             user.save(update_fields=changed)
+        TemporalAdmins.sync(user)
         return user
 
     def get_user(self, user_id):

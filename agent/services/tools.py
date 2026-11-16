@@ -269,7 +269,8 @@ class DocumentTools:
         if not docs:
             return "No file of this chat was added to the knowledge base, so there are no workflow IDs to list."
         try:
-            runs = ChatJobs.runs_of([DocumentWorkflows.workflow_id(doc) for doc in docs], config["configurable"]["vendor"].id)
+            runs = ChatJobs.runs_of([DocumentWorkflows.workflow_id(doc) for doc in docs], config["configurable"]["vendor"].id,
+                                    config["configurable"]["chat"].user_id)
         except Exception as error:
             return f"Error: could not read the workflows from Temporal: {error}"
         lines = []
@@ -464,7 +465,7 @@ class ChatFileTools:
         chat = ChatFileTools.chat(config)
         chosen, lines = ChatFileTools.pick(chat, file_ids, all_files)
         try:
-            runs = ChatJobs.runs_of([ChatFileSummaries.workflow_id(message) for message in chosen], chat.vendor_id)
+            runs = ChatJobs.runs_of([ChatFileSummaries.workflow_id(message) for message in chosen], chat.vendor_id, chat.user_id)
         except Exception as error:
             return f"Error: could not read the tasks from Temporal: {error}", None
         started = {}
@@ -514,7 +515,7 @@ class TaskControlTools:
         chosen, lines = ChatFileTools.pick(chat, file_ids, all_files)
         targets = {message: TaskControlTools.workflow_id(message, job) for message in chosen}
         try:
-            runs = ChatJobs.runs_of([workflow_id for workflow_id in targets.values() if workflow_id], chat.vendor_id)
+            runs = ChatJobs.runs_of([workflow_id for workflow_id in targets.values() if workflow_id], chat.vendor_id, chat.user_id)
         except Exception as error:
             return f"Error: could not read the tasks from Temporal: {error}", None
         done = 0

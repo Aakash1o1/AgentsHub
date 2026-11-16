@@ -43,11 +43,11 @@ class ChatService:
     def finish_answering(chat_id):
         Chat.objects.filter(id=chat_id).update(answering_since=None)
 
-    def ask(self, chat, question, user, file_path=""):
+    def ask(self, chat, question, user, file_url=""):
         if not self.start_answering(chat):
             return False
         renamed = self.title_from_first_message(chat, question, user)
-        user_message = self.save_user_message(chat, question, user, file_path)
+        user_message = self.save_user_message(chat, question, user, file_url)
         ChatNotifier.notify_chat(chat.id, {"event": "message", "message": self.serialize_message(user_message)})
         if renamed:
             ChatNotifier.notify_chat(chat.id, {"event": "renamed", "chat_id": chat.id, "title": chat.title})
@@ -63,12 +63,12 @@ class ChatService:
             self.finish_answering(chat.id)
             ChatNotifier.notify_chat(chat.id, {"event": "error", "detail": f"Could not queue the answer: {error}"})
 
-    def save_user_message(self, chat, question, user, file_path=""):
+    def save_user_message(self, chat, question, user, file_url=""):
         return Message.objects.create(
             chat=chat,
             role="user",
             message=question,
-            attachment=file_path,
+            attachment=file_url,
             chat_session_key=chat.session_key,
             user=user,
             created_by=user,

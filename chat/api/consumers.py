@@ -57,12 +57,12 @@ class ChatConsumer(ChatSocket):
         service = ChatService()
         user = self.scope["user"]
         token = content.get("file") or ""
-        file_path = ChatFileService.path_from_token(token, self.chat, user) if token else ""
-        if token and not file_path:
+        file_url = ChatFileService.url_from_token(token, self.chat, user) if token else ""
+        if token and not file_url:
             self.send_json({"event": "error", "detail": "The attached file could not be used. Upload it again."})
             return
 
-        if not service.ask(self.chat, question, user, file_path):
+        if not service.ask(self.chat, question, user, file_url):
             self.send_json({"event": "busy", "detail": "Wait for the current answer to finish."})
 
 

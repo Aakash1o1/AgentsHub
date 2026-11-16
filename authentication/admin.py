@@ -1,9 +1,10 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import Permission
 from django.db.models import Q
 from unfold.admin import ModelAdmin
 
+from authentication.services.keycloak_users import TemporalAdmins
 from chat.services.access import TaskAccess
 from .models import User
 
@@ -30,6 +31,13 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related("vendors")
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if {"is_superuser", "is_active"} & set(form.changed_data):
+            error = TemporalAdmins.sync(obj)
+            if error:
+                self.message_user(request, error, messages.WARNING)
 
     @admin.display(description="Vendors")
     def vendor_list(self, obj):

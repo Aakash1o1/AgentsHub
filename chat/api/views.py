@@ -66,9 +66,9 @@ class SendMessageView(LoginRequiredMixin, View):
         question = request.POST.get("question")
         chat = Chat.objects.visible_to(user).filter(id=chat_id).first() if user.active_vendor else None
         token = request.POST.get("file") or ""
-        file_path = ChatFileService.path_from_token(token, chat, user) if chat and token else ""
+        file_url = ChatFileService.url_from_token(token, chat, user) if chat and token else ""
         if chat and question:
-            ChatService().ask(chat, question, user, file_path)
+            ChatService().ask(chat, question, user, file_url)
         if chat:
             return redirect(f"/?chat={chat.id}")
         return redirect("chat_home")

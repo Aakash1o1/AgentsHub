@@ -1,5 +1,17 @@
+import httpx
+
 from base.services.keycloak import KeycloakAdmin
 from authentication.models import User
+
+
+class TemporalAdmins:
+    @staticmethod
+    def sync(user):
+        try:
+            KeycloakAdmin().set_admin_group(user)
+        except httpx.HTTPError as error:
+            return f"Could not update Temporal UI access in Keycloak: {error}"
+        return ""
 
 
 class KeycloakUserSync:

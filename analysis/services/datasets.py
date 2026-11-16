@@ -5,7 +5,7 @@ from pathlib import Path
 import duckdb
 from django.db.models import Q
 
-from chat.models import Message
+from chat.models import ChatFile, Message
 
 
 class DatasetService:
@@ -35,7 +35,8 @@ class DatasetService:
     def describe(cls, message):
         connection = duckdb.connect()
         try:
-            return cls.column_types(connection, message.attachment.path)
+            with ChatFile.download(message.attachment) as path:
+                return cls.column_types(connection, path)
         finally:
             connection.close()
 
@@ -109,7 +110,11 @@ class DatasetService:
 
     @classmethod
     def load_for_user(cls, connection, message, user):
-        path = message.attachment.path
+        with ChatFile.download(message.attachment) as path:
+            cls.load_table(connection, message, user, path)
+
+    @classmethod
+    def load_table(cls, connection, message, user, path):
         names = [name for name, _ in cls.column_types(connection, path)]
         select = "*"
         hidden = cls.hidden_columns(names, user)

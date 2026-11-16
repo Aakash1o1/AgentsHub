@@ -2,7 +2,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from django.core import signing
-from django.core.files import File
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.db import transaction
@@ -10,7 +9,7 @@ from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
 from analysis.services.datasets import DatasetService
-from chat.models import Message
+from chat.models import ChatFile, Message
 from scraper.models import Document
 from scraper.services.ingestion import ScraperService
 from scraper.temporal_workflow.temporal import DocumentWorkflows
@@ -54,7 +53,7 @@ class ChatFileService:
         return signing.dumps({"path": path, "chat": chat.id, "user": user.id}, salt=cls.TOKEN_SALT)
 
     @classmethod
-    def path_from_token(cls, token, chat, user):
+    def url_from_token(cls, token, chat, user):
         try:
             data = signing.loads(token, salt=cls.TOKEN_SALT, max_age=cls.TOKEN_MAX_AGE_SECONDS)
         except signing.BadSignature:
@@ -62,9 +61,10 @@ class ChatFileService:
         path = data.get("path", "")
         if data.get("chat") != chat.id or data.get("user") != user.id or not default_storage.exists(path):
             return ""
-        if Message.objects.filter(attachment=path).exists():
+        url = ChatFile.url_for(path)
+        if Message.objects.filter(attachment=url).exists():
             return ""
-        return path
+        return url
 
     @staticmethod
     def for_chat(chat):
@@ -105,8 +105,8 @@ class ChatFileService:
     def source(message):
         return {
             "source_type": message.reading_type,
-            "file_name": message.attachment.name if message.attachment else "",
-            "url": message.url,
+            "file_name": "",
+            "url": message.attachment or message.url,
         }
 
     @classmethod
@@ -128,8 +128,8 @@ class ChatFileService:
             doc = Document(vendor=vendor, url=locked.url, source_type=locked.reading_type,
                            created_by=user, updated_by=user)
             if locked.attachment:
-                with locked.attachment.open("rb") as fh:
-                    doc.file.save(locked.file_label, File(fh), save=False)
+                with ChatFile.download(locked.attachment) as path:
+                    doc.file.save(locked.file_label, ContentFile(Path(path).read_bytes()), save=False)
             doc.save()
             Message.objects.filter(id=locked.id).update(document=doc, updated_by=user)
         return doc, True

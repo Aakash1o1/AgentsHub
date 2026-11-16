@@ -20,10 +20,17 @@ class UploadChatFileView(LoginRequiredMixin, View):
         if error:
             return JsonResponse({"error": error}, status=400)
         path = default_storage.save(ChatFile.upload_to(None, upload.name), upload)
-        if not ChatFileService.is_readable(default_storage.path(path)):
+        if not self.readable(path):
             default_storage.delete(path)
             return JsonResponse({"error": f"Could not read {upload.name}. Check that the file is a valid {Path(path).suffix.lstrip('.').upper()}."}, status=400)
         return JsonResponse({"name": Path(path).name, "token": ChatFileService.file_token(path, chat, user)})
+
+    @staticmethod
+    def readable(path):
+        with default_storage.open(path, "rb") as fh:
+            data = fh.read()
+        with ChatFile.temp_copy(Path(path).name, data) as local_path:
+            return ChatFileService.is_readable(local_path)
 
     @staticmethod
     def open_chat(user, chat_id):

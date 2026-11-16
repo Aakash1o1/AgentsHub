@@ -118,7 +118,7 @@ class MessageAdmin(SoftDeleteAdminMixin, VendorScopedAdmin):
     def attachment_link(self, obj):
         if not obj.attachment:
             return "-"
-        return AdminHtml.link_button(obj.attachment.url, obj.file_label, icon="download", download=True)
+        return AdminHtml.link_button(obj.attachment, obj.file_label, icon="download", download=True)
 
 
     @admin.display(description="Message", ordering="message")

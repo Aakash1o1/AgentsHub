@@ -53,6 +53,11 @@
       "clientRoles": {
         "temporal": [
           "default:write"
+        ],
+        "realm-management": [
+          "view-users",
+          "query-groups",
+          "manage-users"
         ]
       }
     },
@@ -174,7 +179,5 @@
       }
     ]
   },
-  "defaultGroups": [
-    "/temporal-admins"
-  ]
+  "defaultGroups": []
 }

@@ -262,7 +262,7 @@ UNFOLD = {
                     {"title": "Agents", "icon": "smart_toy", "link": reverse_lazy("admin:agent_agent_changelist")},
                     {"title": "Temporal workflows", "icon": "schema",
                      "link": f"{TEMPORAL_UI_URL}/namespaces/{TEMPORAL_NAMESPACE}/workflows",
-                     "permission": lambda request: request.user.has_perm("chat.view_temporal_tasks")},
+                     "permission": lambda request: request.user.is_superuser},
                 ],
             },
             {
@@ -285,4 +285,5 @@ LOGIN_URL = '/admin/login/'
 # Uploaded files (local PDFs) live on disk here; MEDIA_URL is how they are served
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+SITE_URL = os.environ.get('SITE_URL', 'http://localhost:8000')
 

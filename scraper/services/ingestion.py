@@ -61,6 +61,8 @@ class ScraperService:
     def fetch_data(url,timeout):
         response = requests.get(url, timeout=timeout)
         response.raise_for_status()
+        if "charset" not in response.headers.get("Content-Type", ""):
+            response.encoding = "utf-8"
         return response.text
 
     @staticmethod
