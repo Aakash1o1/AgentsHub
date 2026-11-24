@@ -42,6 +42,7 @@ class ChatHomeView(LoginRequiredMixin, View):
             "open_chat": open_chat,
             "chat_messages": open_chat.messages.visible() if open_chat else [],
             "can_see_tasks": TaskAccess.allowed(user),
+            "agents": vendor.agents.filter(is_active=True).order_by("-is_default", "label") if vendor else [],
         })
         return render(request, "chat_admin.html", context)
 
@@ -58,20 +59,6 @@ class CreateChatView(LoginRequiredMixin, View):
             return redirect(f"/?chat={chat.id}")
         return redirect("chat_home")
 
-
-class SendMessageView(LoginRequiredMixin, View):
-    def post(self, request):
-        user = request.user
-        chat_id = request.POST.get("chat_id")
-        question = request.POST.get("question")
-        chat = Chat.objects.visible_to(user).filter(id=chat_id).first() if user.active_vendor else None
-        token = request.POST.get("file") or ""
-        file_url = ChatFileService.url_from_token(token, chat, user) if chat and token else ""
-        if chat and question:
-            ChatService().ask(chat, question, user, file_url)
-        if chat:
-            return redirect(f"/?chat={chat.id}")
-        return redirect("chat_home")
 
 class SummarizeView(LoginRequiredMixin, View):
     def post(self, request):

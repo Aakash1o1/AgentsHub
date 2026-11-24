@@ -43,7 +43,7 @@ class ChatService:
     def finish_answering(chat_id):
         Chat.objects.filter(id=chat_id).update(answering_since=None)
 
-    def ask(self, chat, question, user, file_url=""):
+    def ask(self, chat, agent, question, user, file_url=""):
         if not self.start_answering(chat):
             return False
         renamed = self.title_from_first_message(chat, question, user)
@@ -52,13 +52,13 @@ class ChatService:
         if renamed:
             ChatNotifier.notify_chat(chat.id, {"event": "renamed", "chat_id": chat.id, "title": chat.title})
         ChatNotifier.notify_chat(chat.id, {"event": "thinking"})
-        self.queue_answer(chat, question, user)
+        self.queue_answer(chat, agent, question, user)
         return True
 
-    def queue_answer(self, chat, question, user):
+    def queue_answer(self, chat, agent, question, user):
         from chat.tasks import ChatTasks
         try:
-            ChatTasks.answer.delay(chat.id, question, user.id)
+            ChatTasks.answer.delay(chat.id, agent.id, question, user.id)
         except Exception as error:
             self.finish_answering(chat.id)
             ChatNotifier.notify_chat(chat.id, {"event": "error", "detail": f"Could not queue the answer: {error}"})
@@ -75,9 +75,9 @@ class ChatService:
             updated_by=user,
         )
 
-    def answer_question(self, chat, question, user):
+    def answer_question(self, chat, agent, question, user):
         from agent.services.graph import AgentRunner
-        answer, agent, artifact = AgentRunner().run_agent(question, chat.vendor, chat)
+        answer, agent, artifact = AgentRunner().run_agent(agent, question, chat.vendor, chat)
         return Message.objects.create(
             chat=chat,
             role="assistant",

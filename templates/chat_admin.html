@@ -153,6 +153,9 @@
   .dark .rc-dock .rc-tool.rc-icon:hover, .dark .rc-dock .rc-tool.rc-icon.rc-on { background:rgba(255,255,255,.06); }
   .rc-dock .rc-tool.rc-icon .material-symbols-outlined { font-size:20px; }
   .rc-composer { flex:1; min-width:0; display:flex; align-items:center; gap:8px; }
+  .rc-agent-pick { flex-shrink:0; max-width:140px; height:24px; padding:0 6px; border:0; border-radius:999px;
+                   background:transparent; color:var(--rc-muted); font-size:11px; font-weight:500; cursor:pointer; }
+  .rc-agent-pick:hover, .rc-agent-pick:focus { background:var(--rc-surface-2); color:var(--rc-heading); outline:none; }
   .ragchat .rc-composer input[type=text] { flex:1; min-width:0; border:0; background:transparent; padding:8px 4px; font-size:14px; }
   .rc-composer .rc-send { width:34px; height:34px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:10px; }
   .rc-composer .rc-send .material-symbols-outlined { font-size:20px; }
@@ -271,11 +274,14 @@
               <button type="button" class="rc-tool rc-icon" title="Upload a CSV, Excel, PDF or text file" aria-label="Upload file" data-attach><span class="material-symbols-outlined">attach_file</span></button>
               <button type="button" class="rc-tool rc-icon" title="Add a link (PDF, text file or website)" aria-label="Add link" data-link-toggle><span class="material-symbols-outlined">add_link</span></button>
             </div>
-            <form method="post" action="{% url 'send_message' %}" class="rc-composer" data-upload-url="{% url 'upload_chat_file' %}"{% if open_chat.is_answering %} data-answering{% endif %}>
+            <form method="post" class="rc-composer" data-upload-url="{% url 'upload_chat_file' %}"{% if open_chat.is_answering %} data-answering{% endif %}>
               {% csrf_token %}
               <input type="hidden" name="chat_id" value="{{ open_chat.id }}">
               <input type="hidden" name="file" value="">
               <input type="text" name="question" placeholder="Ask something…" autofocus autocomplete="off">
+              <select class="rc-agent-pick" data-agent-pick aria-label="Agent" title="{{ agents.0.description }}">
+                {% for agent in agents %}<option value="{% url 'agent_message' agent.slug %}" title="{{ agent.description }}">{{ agent.label }}</option>{% empty %}<option value="">No agents</option>{% endfor %}
+              </select>
               <button type="submit" class="rc-btn-primary rc-btn rc-send" aria-label="Send" title="Send"><span class="material-symbols-outlined">arrow_upward</span></button>
             </form>
           </div>
@@ -656,20 +662,41 @@
       addBubble("assistant", "⚠ Connection lost — reload the page.", "");
     };
 
-    form.addEventListener("submit", function (event) {
-      if (uploading || busy) {
-        event.preventDefault();
-        return;
-      }
-      if (socket.readyState !== WebSocket.OPEN) return;
+    const agentPick = document.querySelector("[data-agent-pick]");
+    agentPick.addEventListener("change", function () {
+      agentPick.title = agentPick.selectedOptions[0].title;
+    });
+
+    async function sendToAgent(question, file) {
+      const body = new FormData();
+      body.append("csrfmiddlewaretoken", csrf);
+      body.append("chat_id", chatId);
+      body.append("question", question);
+      body.append("file", file);
+      const response = await fetch(agentPick.value, {method: "POST", body: body});
+      if (response.ok) return;
+      const data = await response.json().catch(function () { return {}; });
+      throw new Error(data.detail || "Could not send the message.");
+    }
+
+    form.addEventListener("submit", async function (event) {
       event.preventDefault();
+      if (uploading || busy || !agentPick.value) return;
       const question = input.value.trim();
       if (!question) return;
-      socket.send(JSON.stringify({question: question, file: fileField.value}));
+      const file = fileField.value;
       clearAttachment();
       showTyping();
       input.value = "";
       setBusy(true);
+      try {
+        await sendToAgent(question, file);
+      } catch (error) {
+        clearPending();
+        setBusy(false);
+        input.value = question;
+        addBubble("assistant", "⚠ " + error.message, "");
+      }
     });
 
     if (form.hasAttribute("data-answering")) {

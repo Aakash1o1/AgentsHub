@@ -2,9 +2,7 @@ from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer, JsonWebsocketConsumer
 
-from chat.services.files import ChatFileService
 from chat.models import Chat, Message
-from chat.services.chat import ChatService
 from chat.services.notifier import ChatNotifier
 from chat.services.summary_progress import ChatFileSummaryProgress
 from scraper.api.consumers import ProgressStreamMixin
@@ -46,24 +44,7 @@ class ChatSocket(JsonWebsocketConsumer):
 
 class ChatConsumer(ChatSocket):
     def receive_json(self, content, **kwargs):
-        question = (content.get("question") or "").strip()
-        if not question:
-            return
-
-        if self.load_chat() is None:
-            self.send_json({"event": "error", "detail": "This chat is no longer available."})
-            return
-
-        service = ChatService()
-        user = self.scope["user"]
-        token = content.get("file") or ""
-        file_url = ChatFileService.url_from_token(token, self.chat, user) if token else ""
-        if token and not file_url:
-            self.send_json({"event": "error", "detail": "The attached file could not be used. Upload it again."})
-            return
-
-        if not service.ask(self.chat, question, user, file_url):
-            self.send_json({"event": "busy", "detail": "Wait for the current answer to finish."})
+        self.send_json({"event": "error", "detail": "Send messages to the agent endpoint, not the socket."})
 
 
 class ChatFileSummaryProgressConsumer(ProgressStreamMixin, AsyncJsonWebsocketConsumer):
